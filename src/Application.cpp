@@ -5,12 +5,17 @@
  */
 
 #include "Application.h"
+#include "Actor.h"
 #include "Constants.h"
 #include "Util.h"
+#include "World.h"
 #include <Corrade/Utility/FormatStl.h>
 #include <Magnum/GL/Context.h>
 #include <Magnum/GL/DefaultFramebuffer.h>
 #include <Magnum/GL/Renderer.h>
+
+#include <Magnum/Magnum.h>
+
 #include <Corrade/Containers/StringStlView.h>
 #include <Corrade/Utility/Debug.h>
 #include <chrono>
@@ -21,6 +26,7 @@
 // -----------------------------------------------------------------------------
 CollisionSim::Application::Application(const Arguments& arguments) 
 : Magnum::Platform::Application{arguments, Configuration{}.setTitle(Constants::ApplicationName)},
+m_world{Magnum::Vector2{windowSize()}.aspectRatio()},
 m_frameTimeSec{Constants::FrameTimeCounterWindow}
 {
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
@@ -32,6 +38,21 @@ m_frameTimeSec{Constants::FrameTimeCounterWindow}
     setMinimalLoopPeriod(0);
     setSwapInterval(0);
 
+    using namespace Magnum::Math::Literals;
+
+    // Add a cube
+    Actor& cube = m_actors.emplace_back(
+        CollisionSim::ActorFactory::cube(1.0));
+    cube.transformation() = Magnum::Matrix4::translation({-5.0,0.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    // Add a sphere
+    Actor& sphere = m_actors.emplace_back(
+        CollisionSim::ActorFactory::sphere(2, 2.0));
+    sphere.transformation() = Magnum::Matrix4::translation({0.0,0.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    // Add a cylinder
+    Actor& cylinder = m_actors.emplace_back(
+        CollisionSim::ActorFactory::cylinder(4, 20, 1.0, Magnum::Primitives::CylinderFlag::CapEnds, 1.2));
+    cylinder.transformation() = Magnum::Matrix4::translation({5.0,0.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+
     m_textRenderer.newText("fps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f));
@@ -42,12 +63,19 @@ m_frameTimeSec{Constants::FrameTimeCounterWindow}
 
 // -----------------------------------------------------------------------------
 void CollisionSim::Application::tickEvent() {
+    using namespace Magnum::Math::Literals;
     using FloatSecond = std::chrono::duration<float,std::ratio<1>>;
-    m_frameTimeSec.add(std::chrono::duration_cast<FloatSecond>(m_frameTimer.step()).count());
+
+    float frameTimeSec{std::chrono::duration_cast<FloatSecond>(m_frameTimer.step()).count()};
+    m_frameTimeSec.add(frameTimeSec);
 
     if (m_textUpdateTimer.stepIfElapsed(Constants::TextUpdateInterval)) {
         m_textRenderer.get("fps").renderer().render(Corrade::Utility::formatString("FPS: {:.1f}", 1.0/m_frameTimeSec.value()));
         m_frameTimeSec.reset();
+    }
+
+    for (Actor& actor : m_actors) {
+        actor.transformation() = actor.transformation() * Magnum::Matrix4::rotationX(360.0_degf * frameTimeSec / 3.0);
     }
 }
 
@@ -56,6 +84,16 @@ void CollisionSim::Application::drawEvent() {
     Magnum::GL::defaultFramebuffer.clear(
         Magnum::GL::FramebufferClear::Color |
         Magnum::GL::FramebufferClear::Depth);
+
+    m_phongShader.setLightPositions({{1.4, 1.0, 0.75, 0.0}})
+        .setAmbientColor(Magnum::Color3{0.3,0.3,0.3})
+        .setProjectionMatrix(m_world.projection());
+    for (Actor& actor : m_actors) {
+        m_phongShader.setDiffuseColor(actor.colour())
+            .setTransformationMatrix(actor.transformation())
+            .setNormalMatrix(actor.transformation().normalMatrix())
+            .draw(actor.mesh());
+    }
 
     m_textRenderer.draw();
 

@@ -7,14 +7,17 @@
 #ifndef COLLISION_SIM_APPLICATION
 #define COLLISION_SIM_APPLICATION
 
-#include "Util.h"
+#include "Actor.h"
 #include "TextRenderer.h"
+#include "Util.h"
+#include "World.h"
+
 #include <Corrade/Containers/Pointer.h>
 #include <Magnum/Platform/Sdl2Application.h>
 #include <Magnum/Shaders/PhongGL.h>
 
-
 #include <memory>
+#include <vector>
 
 namespace CollisionSim {
 class Application final : public Magnum::Platform::Application {
@@ -26,7 +29,10 @@ class Application final : public Magnum::Platform::Application {
         void drawEvent() override;
 
         Magnum::Shaders::PhongGL m_phongShader;
-        
+
+        World m_world;
+        std::vector<Actor> m_actors;
+
         Util::Timer m_frameTimer;
         Util::Timer m_textUpdateTimer;
         TextRenderer m_textRenderer;
