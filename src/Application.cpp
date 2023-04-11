@@ -24,7 +24,7 @@
 #include <Magnum/Math/Color.h>
 
 // -----------------------------------------------------------------------------
-CollisionSim::Application::Application(const Arguments& arguments) 
+CollisionSim::Application::Application(const Arguments& arguments)
 : Magnum::Platform::Application{arguments, Configuration{}.setTitle(Constants::ApplicationName)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio()},
 m_frameTimeSec{Constants::FrameTimeCounterWindow}
@@ -43,15 +43,19 @@ m_frameTimeSec{Constants::FrameTimeCounterWindow}
     // Add a cube
     Actor& cube = m_actors.emplace_back(
         CollisionSim::ActorFactory::cube(1.0));
-    cube.transformation() = Magnum::Matrix4::translation({-5.0,0.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    cube.transformation() = Magnum::Matrix4::translation({-6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
     // Add a sphere
     Actor& sphere = m_actors.emplace_back(
-        CollisionSim::ActorFactory::sphere(2, 2.0));
-    sphere.transformation() = Magnum::Matrix4::translation({0.0,0.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+        CollisionSim::ActorFactory::sphere(2.0, 2));
+    sphere.transformation() = Magnum::Matrix4::translation({-2.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
     // Add a cylinder
     Actor& cylinder = m_actors.emplace_back(
-        CollisionSim::ActorFactory::cylinder(4, 20, 1.0, Magnum::Primitives::CylinderFlag::CapEnds, 1.2));
-    cylinder.transformation() = Magnum::Matrix4::translation({5.0,0.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+        CollisionSim::ActorFactory::cylinder(1.2, 4, 20, 1.0));
+    cylinder.transformation() = Magnum::Matrix4::translation({2.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    // Add a cone
+    Actor& cone = m_actors.emplace_back(
+        CollisionSim::ActorFactory::cone(1.0, 4, 20, 1.0));
+    cone.transformation() = Magnum::Matrix4::translation({6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
 
     m_textRenderer.newText("fps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -75,7 +79,9 @@ void CollisionSim::Application::tickEvent() {
     }
 
     for (Actor& actor : m_actors) {
-        actor.transformation() = actor.transformation() * Magnum::Matrix4::rotationX(360.0_degf * frameTimeSec / 3.0);
+        // actor.transformation() = actor.transformation() * Magnum::Matrix4::rotationX(360.0_degf * frameTimeSec / 3.0);
+        actor.addForce({0.0f, -9.81f * actor.mass(), 0.0f});
+        actor.computeState(frameTimeSec);
     }
 }
 

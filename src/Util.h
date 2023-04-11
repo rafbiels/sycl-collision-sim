@@ -7,6 +7,9 @@
 #ifndef COLLISION_SIM_UTIL
 #define COLLISION_SIM_UTIL
 
+#include <Magnum/Magnum.h>
+#include <Magnum/Math/Matrix3.h>
+#include <Magnum/Math/Vector3.h>
 #include <chrono>
 #include <deque>
 #include <numeric>
@@ -59,6 +62,8 @@ class MovingAverage {
         std::deque<T> m_values;
         size_t m_window{0};
 };
+
+Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b);
 
 } // namespace CollisionSim::Util
 

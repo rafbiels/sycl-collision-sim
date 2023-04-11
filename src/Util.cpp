@@ -32,4 +32,13 @@ bool Timer::stepIfElapsed(Timer::duration_t duration) {
     return true;
 }
 
+// -----------------------------------------------------------------------------
+Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b) {
+    return Magnum::Matrix3{ // construct from *column* vectors
+        {a[0]*b[0], a[1]*b[0], a[2]*b[0]},
+        {a[0]*b[1], a[1]*b[1], a[2]*b[1]},
+        {a[0]*b[2], a[1]*b[2], a[2]*b[2]}
+    };
+}
+
 } // namespace CollisionSim::Util

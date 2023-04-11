@@ -17,36 +17,66 @@
 #include <Magnum/Primitives/Cube.h>
 #include <Magnum/Primitives/Icosphere.h>
 #include <Magnum/Primitives/Cylinder.h>
+#include <Magnum/Primitives/Cone.h>
 #include <Magnum/Trade/MeshData.h>
 
 namespace CollisionSim {
 class Actor {
     public:
         Actor();
-        Actor(Magnum::GL::Mesh&& mesh);
+        Actor(Magnum::Trade::MeshData&& mesh);
 
         Magnum::GL::Mesh& mesh();
 
         Magnum::Matrix4& transformation();
-        void transformation(Magnum::Matrix4& trf);
+        void transformation(const Magnum::Matrix4& trf);
 
         Magnum::Color3& colour();
         void colour(Magnum::Color3& trf);
 
+        float mass() const {return m_mass;}
+
+        /// Apply a force to the centre of mass
+        void addForce(const Magnum::Vector3& force);
+        /// Apply a force to a given point in the body coordinate system
+        void addForce(const Magnum::Vector3& force, const Magnum::Vector3& point);
+        /// Process forces and state to compute new state after time \c dtime
+        void computeState(float dtime);
+
     private:
+        Magnum::Trade::MeshData m_meshData;
         Magnum::GL::Mesh m_mesh;
         Magnum::Matrix4 m_transformation;
         Magnum::Color3 m_colour{0.9, 0.9, 0.9};
+
+        float m_mass{0};
+        Magnum::Vector3 m_centreOfMass;
+        Magnum::Matrix3 m_covariance;
+
+        Magnum::Matrix3 m_bodyInertia;
+        Magnum::Matrix3 m_bodyInertiaInv;
+        Magnum::Matrix3 m_inertiaInv;
+        Magnum::Vector3 m_linearMomentum;
+        Magnum::Vector3 m_angularMomentum;
+        Magnum::Vector3 m_linearVelocity;
+        Magnum::Vector3 m_angularVelocity;
+        Magnum::Vector3 m_force;
+        Magnum::Vector3 m_torque;
 };
 
 namespace ActorFactory {
-    Actor cube(float scale=1.0);
-    Actor sphere(unsigned int subdivisions, float scale=1.0);
-    Actor cylinder(unsigned int rings,
+    Actor cube(float scale);
+    Actor sphere(float scale, unsigned int subdivisions);
+    Actor cylinder(float scale,
+                   unsigned int rings,
                    unsigned int segments,
                    float halfLength,
-                   Magnum::Primitives::CylinderFlags flags={},
-                   float scale=1.0);
+                   Magnum::Primitives::CylinderFlags flags=Magnum::Primitives::CylinderFlag::CapEnds);
+    Actor cone(float scale,
+               unsigned int rings,
+               unsigned int segments,
+               float halfLength,
+               Magnum::Primitives::ConeFlags flags=Magnum::Primitives::ConeFlag::CapEnd);
 }
 
 } // namespace CollisionSim
