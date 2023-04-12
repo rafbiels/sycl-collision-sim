@@ -78,22 +78,10 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
         m_mass += mass;
     }
     // Round off FP-precision shift
-    constexpr static float precision{1e6f};
-    auto myRound = [](float x){
-        if (x < 1.0/precision && x > -1.0/precision) {return 0.0f;}
-        return std::round(precision*x)/precision;
-    };
-    m_mass = myRound(m_mass);
-    m_centreOfMass = {
-        myRound(m_centreOfMass[0]),
-        myRound(m_centreOfMass[1]),
-        myRound(m_centreOfMass[2]),
-    };
-    m_covariance = {
-        {myRound(m_covariance[0][0]), myRound(m_covariance[0][1]), myRound(m_covariance[0][2])},
-        {myRound(m_covariance[1][0]), myRound(m_covariance[1][1]), myRound(m_covariance[1][2])},
-        {myRound(m_covariance[2][0]), myRound(m_covariance[2][1]), myRound(m_covariance[2][2])},
-    };
+    m_mass = Util::round(m_mass);
+    m_centreOfMass = Util::round(m_centreOfMass);
+    m_covariance = Util::round(m_covariance);
+
     Corrade::Utility::Debug{} << "Mass: " << m_mass << ", Centre of mass: " << m_centreOfMass;
     // Not sure about the translation step here
     Corrade::Utility::Debug{} << "Covariance before translation:\n" << m_covariance;
@@ -147,6 +135,10 @@ void CollisionSim::Actor::addForce(const Magnum::Vector3& force, const Magnum::V
 
 // -----------------------------------------------------------------------------
 void CollisionSim::Actor::computeState(float dtime) {
+    // ===========================================
+    // Rigid body physics simulation based on D. Baraff 2001
+    // https://graphics.pixar.com/pbm2001/pdf/notesg.pdf
+    // ===========================================
     // Compute linear and angular momentum
     m_linearMomentum += m_force * dtime;
     m_angularMomentum += m_torque * dtime;
@@ -182,7 +174,10 @@ void CollisionSim::Actor::computeState(float dtime) {
         {dx[0], dx[1], dx[2], 0.0f},
     };
 
-    m_transformation = m_transformation + trf;
+    // TODO: fix an issue where over time fluctuations add up causing
+    // m_transformation to run into the following exception:
+    // Math::Matrix4::rotation(): the normalized rotation part is not orthogonal
+    m_transformation = Util::round(m_transformation + trf);
 
     // Corrade::Utility::Debug{} << "new trf =\n" << m_transformation;
 

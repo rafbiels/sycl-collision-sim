@@ -60,9 +60,13 @@ m_frameTimeSec{Constants::FrameTimeCounterWindow}
     m_textRenderer.newText("fps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f));
+    m_textRenderer.newText("clock",
+        Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
+        Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.9f}));
 
     m_textUpdateTimer.reset();
     m_frameTimer.reset();
+    m_wallClock.reset();
 }
 
 // -----------------------------------------------------------------------------
@@ -75,13 +79,14 @@ void CollisionSim::Application::tickEvent() {
 
     if (m_textUpdateTimer.stepIfElapsed(Constants::TextUpdateInterval)) {
         m_textRenderer.get("fps").renderer().render(Corrade::Utility::formatString("FPS: {:.1f}", 1.0/m_frameTimeSec.value()));
+        float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
+        m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Time: {:.1f}s", wallTimeSec));
         m_frameTimeSec.reset();
     }
 
     for (Actor& actor : m_actors) {
-        // actor.transformation() = actor.transformation() * Magnum::Matrix4::rotationX(360.0_degf * frameTimeSec / 3.0);
-        actor.addForce({0.0f, -9.81f * actor.mass(), 0.0f});
-        actor.computeState(frameTimeSec);
+        actor.addForce({0.0f, -9.81f * Constants::Units::Distance * actor.mass(), 0.0f});
+        actor.computeState(Constants::RealTimeScale * frameTimeSec);
     }
 }
 

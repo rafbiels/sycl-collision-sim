@@ -8,8 +8,10 @@
 #define COLLISION_SIM_UTIL
 
 #include <Magnum/Magnum.h>
-#include <Magnum/Math/Matrix3.h>
 #include <Magnum/Math/Vector3.h>
+#include <Magnum/Math/Vector4.h>
+#include <Magnum/Math/Matrix3.h>
+#include <Magnum/Math/Matrix4.h>
 #include <chrono>
 #include <deque>
 #include <numeric>
@@ -64,6 +66,13 @@ class MovingAverage {
 };
 
 Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b);
+
+constexpr static float RoundingPrecision{1e6};
+float round(float x);
+Magnum::Vector3 round(const Magnum::Vector3& v);
+Magnum::Vector4 round(const Magnum::Vector4& v);
+Magnum::Matrix3 round(const Magnum::Matrix3& m);
+Magnum::Matrix4 round(const Magnum::Matrix4& m);
 
 } // namespace CollisionSim::Util
 

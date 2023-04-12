@@ -41,4 +41,40 @@ Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b)
     };
 }
 
+// -----------------------------------------------------------------------------
+float round(float x) {
+    if (x < 1.0/RoundingPrecision && x > -1.0/RoundingPrecision) {return 0.0f;}
+    return std::round(RoundingPrecision*x)/RoundingPrecision;
+}
+
+// -----------------------------------------------------------------------------
+Magnum::Vector3 round(const Magnum::Vector3& v) {
+    return Magnum::Vector3{
+        round(v[0]), round(v[1]), round(v[2])
+    };
+}
+
+// -----------------------------------------------------------------------------
+Magnum::Vector4 round(const Magnum::Vector4& v) {
+    return Magnum::Vector4{
+        round(v[0]), round(v[1]), round(v[2]), round(v[3])
+    };
+}
+
+// -----------------------------------------------------------------------------
+Magnum::Matrix3 round(const Magnum::Matrix3& m) {
+    return Magnum::Matrix3{
+        round(m[0]), round(m[1]), round(m[2])
+    };
+}
+
+// -----------------------------------------------------------------------------
+Magnum::Matrix4 round(const Magnum::Matrix4& m) {
+    return Magnum::Matrix4{
+        round(m[0]), round(m[1]), round(m[2]), round(m[3])
+    };
+}
+
+// -----------------------------------------------------------------------------
+
 } // namespace CollisionSim::Util

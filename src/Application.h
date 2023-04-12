@@ -35,6 +35,7 @@ class Application final : public Magnum::Platform::Application {
 
         Util::Timer m_frameTimer;
         Util::Timer m_textUpdateTimer;
+        Util::Timer m_wallClock;
         TextRenderer m_textRenderer;
         Util::MovingAverage<float> m_frameTimeSec;
 };
