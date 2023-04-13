@@ -8,6 +8,8 @@
 #define COLLISION_SIM_CONSTANTS
 
 #include "Util.h"
+#include <Magnum/Magnum.h>
+#include <Magnum/Math/Vector3.h>
 #include <string_view>
 
 namespace CollisionSim::Constants {
@@ -33,6 +35,9 @@ constexpr static float Mass{1.0}; // kg
 constexpr static float Time{1.0}; // s
 constexpr static float Density{Mass/Volume}; // kg/cm^3
 }
+
+/// Default dimensions of the world
+constexpr static Magnum::Vector3 DefaultWorldDimensions{20.0f,20.0f,20.0f};
 
 /// Uniform density of the body materials
 constexpr static float DefaultDensity{1000.0 * Units::Density}; // kg/cm^3, approx. water density

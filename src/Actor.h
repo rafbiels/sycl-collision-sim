@@ -7,6 +7,7 @@
 #ifndef COLLISION_SIM_ACTOR
 #define COLLISION_SIM_ACTOR
 
+#include "Shape.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/Math/Matrix4.h>
@@ -21,18 +22,9 @@
 #include <Magnum/Trade/MeshData.h>
 
 namespace CollisionSim {
-class Actor {
+class Actor : public Shape {
     public:
-        Actor();
         Actor(Magnum::Trade::MeshData&& mesh);
-
-        Magnum::GL::Mesh& mesh();
-
-        Magnum::Matrix4& transformation();
-        void transformation(const Magnum::Matrix4& trf);
-
-        Magnum::Color3& colour();
-        void colour(Magnum::Color3& trf);
 
         float mass() const {return m_mass;}
 
@@ -44,11 +36,6 @@ class Actor {
         void computeState(float dtime);
 
     private:
-        Magnum::Trade::MeshData m_meshData;
-        Magnum::GL::Mesh m_mesh;
-        Magnum::Matrix4 m_transformation;
-        Magnum::Color3 m_colour{0.9, 0.9, 0.9};
-
         float m_mass{0};
         Magnum::Vector3 m_centreOfMass;
         Magnum::Matrix3 m_covariance;

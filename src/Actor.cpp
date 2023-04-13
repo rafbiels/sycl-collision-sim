@@ -27,16 +27,15 @@ Magnum::Trade::MeshData scaledMesh(Magnum::Trade::MeshData&& meshData, float sca
 
 // -----------------------------------------------------------------------------
 CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
-: m_meshData{std::move(meshData)} {
-    m_mesh = Magnum::MeshTools::compile(m_meshData);
+: Shape{std::move(meshData)} {
 
     // ===========================================
     // Calculate body inertia matrix by forming tetrahedrons from each face
     // and the origin of the coordinate system. Follow the algorithm from
     // Blow and Binstock 2004, http://number-none.com/blow/inertia/
     // ===========================================
-    auto vertices = m_meshData.positions3DAsArray();
-    auto indices = m_meshData.indicesAsArray();
+    auto vertices = Shape::meshData().positions3DAsArray();
+    auto indices = Shape::meshData().indicesAsArray();
     size_t nFaces{indices.size()/3};
     // Corrade::Utility::Debug{} << "Printing Actor meshdata " << vertices.size() << " vertices:";
     // for (const auto& v : vertices) {
@@ -97,31 +96,6 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
 }
 
 // -----------------------------------------------------------------------------
-Magnum::GL::Mesh& CollisionSim::Actor::mesh() {
-    return m_mesh;
-}
-
-// -----------------------------------------------------------------------------
-Magnum::Matrix4& CollisionSim::Actor::transformation() {
-    return m_transformation;
-}
-
-// -----------------------------------------------------------------------------
-void CollisionSim::Actor::transformation(const Magnum::Matrix4& trf) {
-    m_transformation = trf;
-}
-
-// -----------------------------------------------------------------------------
-Magnum::Color3& CollisionSim::Actor::colour() {
-    return m_colour;
-}
-
-// -----------------------------------------------------------------------------
-void CollisionSim::Actor::colour(Magnum::Color3& trf) {
-    m_colour = trf;
-}
-
-// -----------------------------------------------------------------------------
 void CollisionSim::Actor::addForce(const Magnum::Vector3& force) {
     addForce(force, m_centreOfMass);
 }
@@ -136,8 +110,8 @@ void CollisionSim::Actor::addForce(const Magnum::Vector3& force, const Magnum::V
 void CollisionSim::Actor::computeState(float dtime) {
     // Fix floating point loss of orthogonality in the rotation matrix
     // and store the rotation matrix on the stack
-    Util::orthonormaliseRotation(m_transformation);
-    Magnum::Matrix3 rotation{m_transformation.rotation()};
+    Util::orthonormaliseRotation(transformation());
+    Magnum::Matrix3 rotation{transformation().rotation()};
 
     // ===========================================
     // Rigid body physics simulation based on D. Baraff 2001
@@ -178,7 +152,7 @@ void CollisionSim::Actor::computeState(float dtime) {
         {dx[0], dx[1], dx[2], 0.0f},
     };
 
-    m_transformation = m_transformation + trf;
+    transformation(transformation() + trf);
 
     // Corrade::Utility::Debug{} << "new trf =\n" << m_transformation;
 

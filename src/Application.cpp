@@ -7,6 +7,7 @@
 #include "Application.h"
 #include "Actor.h"
 #include "Constants.h"
+#include "Shape.h"
 #include "Util.h"
 #include "World.h"
 #include <Corrade/Utility/FormatStl.h>
@@ -26,7 +27,7 @@
 // -----------------------------------------------------------------------------
 CollisionSim::Application::Application(const Arguments& arguments)
 : Magnum::Platform::Application{arguments, Configuration{}.setTitle(Constants::ApplicationName)},
-m_world{Magnum::Vector2{windowSize()}.aspectRatio()},
+m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
 m_frameTimeSec{Constants::FrameTimeCounterWindow}
 {
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
@@ -100,13 +101,19 @@ void CollisionSim::Application::drawEvent() {
         Magnum::GL::FramebufferClear::Depth);
 
     m_phongShader.setLightPositions({{1.4, 1.0, 0.75, 0.0}})
-        .setAmbientColor(Magnum::Color3{0.3,0.3,0.3})
+        .setDiffuseColor({0.5f,0.5f,0.5f})
         .setProjectionMatrix(m_world.projection());
     for (Actor& actor : m_actors) {
-        m_phongShader.setDiffuseColor(actor.colour())
+        m_phongShader.setAmbientColor(actor.colour())
             .setTransformationMatrix(actor.transformation())
             .setNormalMatrix(actor.transformation().normalMatrix())
             .draw(actor.mesh());
+    }
+    for (Shape& wall : m_world.walls()) {
+        m_phongShader.setAmbientColor(wall.colour())
+            .setTransformationMatrix(wall.transformation())
+            .setNormalMatrix(wall.transformation().normalMatrix())
+            .draw(wall.mesh());
     }
 
     m_textRenderer.draw();

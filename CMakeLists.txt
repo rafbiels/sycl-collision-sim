@@ -10,10 +10,11 @@ find_package(Magnum
 corrade_add_resource(CollisionSim_RESOURCES assets/resources.conf)
 
 add_executable(collision-sim src/Application.cpp
-    src/Util.cpp
-    src/TextRenderer.cpp
-    src/World.cpp
     src/Actor.cpp
+    src/Shape.cpp
+    src/TextRenderer.cpp
+    src/Util.cpp
+    src/World.cpp
     ${CollisionSim_RESOURCES})
 
 target_link_libraries(collision-sim PRIVATE
