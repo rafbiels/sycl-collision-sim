@@ -24,26 +24,30 @@ constexpr static Util::Timer::duration_t TextUpdateInterval{std::chrono::millise
 constexpr static size_t FrameTimeCounterWindow{200};
 
 /// Slow down or speed up the simulation with respect to real time
-constexpr static float RealTimeScale{0.05};
+constexpr static float RealTimeScale{0.5f};
 
 /// Scaling factors with respect to SI units
 namespace Units {
 constexpr static float Distance{100.f}; // cm
 constexpr static float Area{Distance*Distance}; // cm^2
 constexpr static float Volume{Distance*Distance*Distance}; // cm^3
-constexpr static float Mass{1.0}; // kg
-constexpr static float Time{1.0}; // s
+constexpr static float Mass{1.0f}; // kg
+constexpr static float Time{1.0f}; // s
 constexpr static float Density{Mass/Volume}; // kg/cm^3
+constexpr static float Velocity{Distance/Time}; // cm/s
 }
 
 /// Default dimensions of the world
-constexpr static Magnum::Vector3 DefaultWorldDimensions{20.0f,20.0f,20.0f};
+constexpr static Magnum::Vector3 DefaultWorldDimensions{10.0f,8.0f,10.0f};
 
 /// Uniform density of the body materials
-constexpr static float DefaultDensity{1000.0 * Units::Density}; // kg/cm^3, approx. water density
+constexpr static float DefaultDensity{1000.0f * Units::Density}; // kg/cm^3, approx. water density
 
 /// Gravity
-constexpr static float EarthGravity{-9.81 * Units::Distance / (Units::Time * Units::Time)}; // m/s^2
+constexpr static float EarthGravity{-9.81f * Units::Distance / (Units::Time * Units::Time)}; // m/s^2
+
+/// Restitution coefficient (fraction of kinematic energy conserved in a collision)
+constexpr static float RestitutionCoefficient{0.95f};
 
 } // namespace CollisionSim::Constants
 

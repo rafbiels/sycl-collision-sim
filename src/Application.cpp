@@ -86,10 +86,12 @@ void CollisionSim::Application::tickEvent() {
     }
 
     for (Actor& actor : m_actors) {
+        // Process world collision
+        actor.collideWorld(m_world.boundaries());
         // Add gravity
         actor.addForce({0.0f, m_world.gravity() * actor.mass(), 0.0f});
         // Add arbitrary extra force for testing the simulation
-        actor.addForce({10.0f, 0.0f, 0.0f}, {0.0f,0.0f,100.0f});
+        // actor.addForce({10.0f, 0.0f, 0.0f}, {0.0f,0.0f,100.0f});
         actor.computeState(Constants::RealTimeScale * frameTimeSec);
     }
 }

@@ -11,6 +11,8 @@
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/Math/Matrix4.h>
+#include <Magnum/Math/Vector3.h>
+#include <Magnum/Math/Range.h>
 #include <Magnum/Math/Color.h>
 
 #include <Magnum/MeshTools/Compile.h>
@@ -34,6 +36,8 @@ class Actor : public Shape {
         void addForce(const Magnum::Vector3& force, const Magnum::Vector3& point);
         /// Process forces and state to compute new state after time \c dtime
         void computeState(float dtime);
+        /// Check world boundary collisions and apply the collision physics
+        void collideWorld(const Magnum::Range3D& boundaries);
 
     private:
         float m_mass{0};

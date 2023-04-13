@@ -8,13 +8,13 @@
 #include "Constants.h"
 #include "Util.h"
 #include <Corrade/Utility/Debug.h>
-#include <Magnum/Magnum.h>
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/Primitives/Cone.h>
 #include <Magnum/Primitives/Cube.h>
 #include <Magnum/Primitives/Cylinder.h>
 #include <Magnum/Primitives/Icosphere.h>
 #include <Magnum/Trade/MeshData.h>
+#include <limits>
 
 namespace {
 Magnum::Trade::MeshData scaledMesh(Magnum::Trade::MeshData&& meshData, float scale) {
@@ -153,6 +153,7 @@ void CollisionSim::Actor::computeState(float dtime) {
     };
 
     transformation(transformation() + trf);
+    updateVertexPositions();
 
     // Corrade::Utility::Debug{} << "new trf =\n" << m_transformation;
 
@@ -162,6 +163,93 @@ void CollisionSim::Actor::computeState(float dtime) {
     // Reset force and torque
     m_force = {0, 0, 0};
     m_torque = {0, 0, 0};
+}
+
+// -----------------------------------------------------------------------------
+void CollisionSim::Actor::collideWorld(const Magnum::Range3D& boundaries) {
+    enum class Collision : short {Min=-1, None=0, Max=1};
+    std::array<Collision,3> collisions{Collision::None, Collision::None, Collision::None};
+    size_t collidingVertexIndex{std::numeric_limits<size_t>::max()};
+
+    const auto& vertices{vertexPositionsWorld()};
+    const Magnum::Vector3& min{boundaries.min()};
+    const Magnum::Vector3& max{boundaries.max()};
+    Magnum::Vector3 normal{0.0f, 0.0f, 0.0f};
+
+    for (size_t iVertex{0}; iVertex < vertices[0].size(); ++iVertex) {
+        if (vertices[0][iVertex] < min[0]) {
+            collisions[0]=Collision::Min;
+            collidingVertexIndex = iVertex;
+            normal[0] = 1.0;
+            break;
+        }
+        if (vertices[0][iVertex] > max[0]) {
+            collisions[0]=Collision::Max;
+            collidingVertexIndex = iVertex;
+            normal[0] = -1.0;
+            break;
+        }
+        if (vertices[1][iVertex] < min[1]) {
+            collisions[1]=Collision::Min;
+            collidingVertexIndex = iVertex;
+            normal[1] = 1.0;
+            break;
+        }
+        if (vertices[1][iVertex] > max[1]) {
+            collisions[1]=Collision::Max;
+            collidingVertexIndex = iVertex;
+            normal[1] = -1.0;
+            break;
+        }
+        if (vertices[2][iVertex] < min[2]) {
+            collisions[2]=Collision::Min;
+            collidingVertexIndex = iVertex;
+            normal[2] = 1.0;
+            break;
+        }
+        if (vertices[2][iVertex] > max[2]) {
+            collisions[2]=Collision::Max;
+            collidingVertexIndex = iVertex;
+            normal[2] = -1.0;
+            break;
+        }
+    }
+    if (collisions==std::array<Collision,3>{Collision::None,Collision::None,Collision::None}) {
+        return;
+    }
+    Corrade::Utility::Debug{} << "Collision with world detected, normal = " << normal;
+    if (Magnum::Math::dot(m_linearVelocity, normal) > 0.0f) {
+        Corrade::Utility::Debug{} << "Velocity points away from the wall, skipping this collision";
+        return;
+    }
+    const Magnum::Vector3 collidingVertexWorld{
+        vertexPositionsWorld()[0][collidingVertexIndex],
+        vertexPositionsWorld()[1][collidingVertexIndex],
+        vertexPositionsWorld()[2][collidingVertexIndex]
+    };
+    Corrade::Utility::Debug{} << "Before: v = " << m_linearVelocity;
+    const Magnum::Vector3 radius = collidingVertexWorld - transformation().translation();
+    const auto a = Magnum::Math::cross(radius, normal);
+    const auto b = m_inertiaInv * a;
+    const auto c = Magnum::Math::cross(b, radius);
+    const auto d = Magnum::Math::dot(c, normal);
+    float impulse = (-1.0f - Constants::RestitutionCoefficient) * Magnum::Math::dot(m_linearVelocity, normal) / (1.0f/m_mass + d);
+
+    Corrade::Utility::Debug{} << "impulse = " << impulse;
+
+    m_linearVelocity += (impulse / m_mass) * normal;
+    m_angularVelocity += impulse * m_inertiaInv * a;
+
+    // TODO: implement better resting condition
+    if (normal.y() > 0 && m_linearVelocity.y() > 0 && m_linearVelocity.y() < 0.1) {
+        Corrade::Utility::Debug{} << "Resting on the floor, resetting vy to 0";
+        m_linearVelocity[1]=0;
+    }
+
+    m_linearMomentum = m_mass * m_linearVelocity;
+    m_angularMomentum = m_inertiaInv.inverted() * m_angularVelocity;
+    Corrade::Utility::Debug{} << "After: v = " << m_linearVelocity;
+
 }
 
 // -----------------------------------------------------------------------------

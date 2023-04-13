@@ -9,9 +9,12 @@
 
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Mesh.h>
-#include <Magnum/Math/Matrix4.h>
 #include <Magnum/Math/Color.h>
+#include <Magnum/Math/Matrix4.h>
+#include <Magnum/Math/Range.h>
 #include <Magnum/Trade/MeshData.h>
+#include <array>
+#include <vector>
 
 namespace CollisionSim {
 class Shape {
@@ -28,11 +31,28 @@ class Shape {
         Magnum::Color3& colour();
         void colour(const Magnum::Color3& colour);
 
+        /// Returns SoA vertex positions in body coordinate system
+        const std::array<std::vector<float>,3>& vertexPositions();
+
+        /// Returns SoA vertex positions in world coordinate system
+        const std::array<std::vector<float>,3>& vertexPositionsWorld();
+
+        /// Return the bounding box in world coordinate system
+        Magnum::Range3D axisAlignedBoundingBox();
+
+    protected:
+        /// Recalculate m_vertexPositionsWorld
+        void updateVertexPositions();
+
     private:
         Magnum::Trade::MeshData m_meshData;
         Magnum::GL::Mesh m_mesh;
         Magnum::Matrix4 m_transformation;
         Magnum::Color3 m_colour{0.5f,0.5f,0.5f};
+        /// SoA vertex data in body coordinate system
+        std::array<std::vector<float>,3> m_vertexPositions;
+        /// SoA vertex data in world coordinate system
+        std::array<std::vector<float>,3> m_vertexPositionsWorld;
 };
 
 } // namespace CollisionSim

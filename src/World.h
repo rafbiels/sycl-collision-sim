@@ -11,6 +11,7 @@
 #include "Shape.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Matrix4.h>
+#include <Magnum/Math/Range.h>
 #include <Magnum/GL/Mesh.h>
 #include <array>
 
@@ -26,13 +27,15 @@ class World {
         Magnum::Matrix4& projection();
         void projection(Magnum::Matrix4& proj);
 
+        const Magnum::Range3D& boundaries() const;
+
         float gravity() const;
 
         std::array<Shape,NumWalls>& walls();
 
     private:
         Magnum::Matrix4 m_projection;
-        Magnum::Vector3 m_dimensions;
+        Magnum::Range3D m_boundaries;
         float m_gravity{0};
         std::array<Shape,NumWalls> m_walls;
 };
