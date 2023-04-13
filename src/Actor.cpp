@@ -9,7 +9,6 @@
 #include "Util.h"
 #include <Corrade/Utility/Debug.h>
 #include <Magnum/Magnum.h>
-#include <Magnum/Math/Tags.h>
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/Primitives/Cone.h>
 #include <Magnum/Primitives/Cube.h>
@@ -82,16 +81,16 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
     m_centreOfMass = Util::round(m_centreOfMass);
     m_covariance = Util::round(m_covariance);
 
-    Corrade::Utility::Debug{} << "Mass: " << m_mass << ", Centre of mass: " << m_centreOfMass;
+    // Corrade::Utility::Debug{} << "Mass: " << m_mass << ", Centre of mass: " << m_centreOfMass;
     // Not sure about the translation step here
-    Corrade::Utility::Debug{} << "Covariance before translation:\n" << m_covariance;
+    // Corrade::Utility::Debug{} << "Covariance before translation:\n" << m_covariance;
     auto dx = -1.0f * m_centreOfMass;
     m_covariance += m_mass * (
         Util::outerProduct(dx, Magnum::Vector3{}) +
         Util::outerProduct(Magnum::Vector3{}, dx) +
         Util::outerProduct(dx, dx)
     );
-    Corrade::Utility::Debug{} << "Covariance after translation:\n" << m_covariance;
+    // Corrade::Utility::Debug{} << "Covariance after translation:\n" << m_covariance;
 
     m_bodyInertia = Magnum::Matrix3{Magnum::Math::IdentityInit, m_covariance.trace()} - m_covariance;
     m_bodyInertiaInv = m_bodyInertia.inverted();
@@ -135,6 +134,11 @@ void CollisionSim::Actor::addForce(const Magnum::Vector3& force, const Magnum::V
 
 // -----------------------------------------------------------------------------
 void CollisionSim::Actor::computeState(float dtime) {
+    // Fix floating point loss of orthogonality in the rotation matrix
+    // and store the rotation matrix on the stack
+    Util::orthonormaliseRotation(m_transformation);
+    Magnum::Matrix3 rotation{m_transformation.rotation()};
+
     // ===========================================
     // Rigid body physics simulation based on D. Baraff 2001
     // https://graphics.pixar.com/pbm2001/pdf/notesg.pdf
@@ -147,7 +151,7 @@ void CollisionSim::Actor::computeState(float dtime) {
 
     // Compute linear and angular velocity
     m_linearVelocity = m_linearMomentum / m_mass;
-    m_inertiaInv =  m_transformation.rotation() * m_bodyInertiaInv * m_transformation.rotation().transposed();
+    m_inertiaInv =  rotation * m_bodyInertiaInv * rotation.transposed();
     m_angularVelocity = m_inertiaInv * m_angularMomentum;
 
     // Corrade::Utility::Debug{} << "v = " << m_linearVelocity << ", omega = " << m_angularVelocity;
@@ -160,7 +164,7 @@ void CollisionSim::Actor::computeState(float dtime) {
             { v[1], -v[0],  0.0f}
         };
     };
-    Magnum::Matrix3 drot = star(m_angularVelocity) * m_transformation.rotation() * dtime;
+    Magnum::Matrix3 drot = star(m_angularVelocity) * rotation * dtime;
     Magnum::Vector3 dx = m_linearVelocity * dtime;
 
     // Corrade::Utility::Debug{} << "dx = " << dx << "\ndrot:\n" << drot;
@@ -174,10 +178,7 @@ void CollisionSim::Actor::computeState(float dtime) {
         {dx[0], dx[1], dx[2], 0.0f},
     };
 
-    // TODO: fix an issue where over time fluctuations add up causing
-    // m_transformation to run into the following exception:
-    // Math::Matrix4::rotation(): the normalized rotation part is not orthogonal
-    m_transformation = Util::round(m_transformation + trf);
+    m_transformation = m_transformation + trf;
 
     // Corrade::Utility::Debug{} << "new trf =\n" << m_transformation;
 

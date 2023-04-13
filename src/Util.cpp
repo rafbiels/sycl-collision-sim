@@ -5,6 +5,7 @@
  */
 
 #include "Util.h"
+#include <Magnum/Math/Algorithms/GramSchmidt.h>
 
 namespace CollisionSim::Util {
 
@@ -76,5 +77,17 @@ Magnum::Matrix4 round(const Magnum::Matrix4& m) {
 }
 
 // -----------------------------------------------------------------------------
+void orthonormaliseRotation(Magnum::Matrix4 &trfMatrix) {
+    Magnum::Matrix3 rot{
+        Magnum::Vector3{trfMatrix[0][0], trfMatrix[0][1], trfMatrix[0][2]}.normalized(),
+        Magnum::Vector3{trfMatrix[1][0], trfMatrix[1][1], trfMatrix[1][2]}.normalized(),
+        Magnum::Vector3{trfMatrix[2][0], trfMatrix[2][1], trfMatrix[2][2]}.normalized()
+    };
+    if (rot.isOrthogonal()) {return;}
+    Magnum::Math::Algorithms::gramSchmidtOrthonormalizeInPlace(rot);
+    trfMatrix[0] = {rot[0][0], rot[0][1], rot[0][2], 0.0f};
+    trfMatrix[1] = {rot[1][0], rot[1][1], rot[1][2], 0.0f};
+    trfMatrix[2] = {rot[2][0], rot[2][1], rot[2][2], 0.0f};
+}
 
 } // namespace CollisionSim::Util

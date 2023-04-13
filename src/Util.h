@@ -74,6 +74,8 @@ Magnum::Vector4 round(const Magnum::Vector4& v);
 Magnum::Matrix3 round(const Magnum::Matrix3& m);
 Magnum::Matrix4 round(const Magnum::Matrix4& m);
 
+void orthonormaliseRotation(Magnum::Matrix4& trfMatrix);
+
 } // namespace CollisionSim::Util
 
 #endif // COLLISION_SIM_UTIL

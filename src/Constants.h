@@ -38,7 +38,7 @@ constexpr static float Density{Mass/Volume}; // kg/cm^3
 constexpr static float DefaultDensity{1000.0 * Units::Density}; // kg/cm^3, approx. water density
 
 /// Gravity
-constexpr static float EarthGravity{9.81 * Units::Distance / (Units::Time * Units::Time)}; // m/s^2
+constexpr static float EarthGravity{-9.81 * Units::Distance / (Units::Time * Units::Time)}; // m/s^2
 
 } // namespace CollisionSim::Constants
 
