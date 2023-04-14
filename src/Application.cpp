@@ -27,6 +27,7 @@
 // -----------------------------------------------------------------------------
 CollisionSim::Application::Application(const Arguments& arguments)
 : Magnum::Platform::Application{arguments, Configuration{}.setTitle(Constants::ApplicationName)},
+m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
 m_frameTimeSec{Constants::FrameTimeCounterWindow}
 {
@@ -41,22 +42,29 @@ m_frameTimeSec{Constants::FrameTimeCounterWindow}
 
     using namespace Magnum::Math::Literals;
 
+    constexpr static Magnum::Color3 defaultColour{64.0f/255.0f, 106.0f/255.0f, 128.0f/255.0f};
+
+    m_actors.reserve(4);
     // Add a cube
     Actor& cube = m_actors.emplace_back(
         CollisionSim::ActorFactory::cube(1.0));
     cube.transformation() = Magnum::Matrix4::translation({-6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    cube.colour(defaultColour);
     // Add a sphere
     Actor& sphere = m_actors.emplace_back(
         CollisionSim::ActorFactory::sphere(2.0, 2));
     sphere.transformation() = Magnum::Matrix4::translation({-2.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    sphere.colour(defaultColour);
     // Add a cylinder
     Actor& cylinder = m_actors.emplace_back(
         CollisionSim::ActorFactory::cylinder(1.2, 4, 20, 1.0));
     cylinder.transformation() = Magnum::Matrix4::translation({2.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    cylinder.colour(defaultColour);
     // Add a cone
     Actor& cone = m_actors.emplace_back(
         CollisionSim::ActorFactory::cone(1.0, 4, 20, 1.0));
     cone.transformation() = Magnum::Matrix4::translation({6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
+    cone.colour(defaultColour);
 
     m_textRenderer.newText("fps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -78,9 +86,10 @@ void CollisionSim::Application::tickEvent() {
     float frameTimeSec{std::chrono::duration_cast<FloatSecond>(m_frameTimer.step()).count()};
     m_frameTimeSec.add(frameTimeSec);
 
+    float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
+
     if (m_textUpdateTimer.stepIfElapsed(Constants::TextUpdateInterval)) {
         m_textRenderer.get("fps").renderer().render(Corrade::Utility::formatString("FPS: {:.1f}", 1.0/m_frameTimeSec.value()));
-        float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
         m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Time: {:.1f}s", wallTimeSec));
         m_frameTimeSec.reset();
     }
@@ -91,7 +100,9 @@ void CollisionSim::Application::tickEvent() {
         // Add gravity
         actor.addForce({0.0f, m_world.gravity() * actor.mass(), 0.0f});
         // Add arbitrary extra force for testing the simulation
-        // actor.addForce({10.0f, 0.0f, 0.0f}, {0.0f,0.0f,100.0f});
+        if (wallTimeSec < 0.1) {
+            actor.addForce({0.0f, 0.0f, 100.0f*actor.mass()}, {0.0f,0.0f,0.0f});
+        }
         actor.computeState(Constants::RealTimeScale * frameTimeSec);
     }
 }
@@ -102,17 +113,25 @@ void CollisionSim::Application::drawEvent() {
         Magnum::GL::FramebufferClear::Color |
         Magnum::GL::FramebufferClear::Depth);
 
-    m_phongShader.setLightPositions({{1.4, 1.0, 0.75, 0.0}})
-        .setDiffuseColor({0.5f,0.5f,0.5f})
+    constexpr static Magnum::Color3 lightColour{250.0f/255.0f, 245.0f/255.0f, 240.0f/255.0f};
+
+    m_phongShader.setLightPositions({{0.5, 1.0, 1.5, 0.0},{-0.5, 1.0, 1.5, 0.0}})
+        .setLightColors({0.8f*lightColour, 0.2f*lightColour})
+        .setSpecularColor(0.1f*lightColour)
+        .setShininess(100.0f)
         .setProjectionMatrix(m_world.projection());
     for (Actor& actor : m_actors) {
-        m_phongShader.setAmbientColor(actor.colour())
+        m_phongShader.setAmbientColor(0.8f*actor.colour())
+            .setDiffuseColor(actor.colour())
+            .setSpecularColor(0.1f*actor.colour())
             .setTransformationMatrix(actor.transformation())
             .setNormalMatrix(actor.transformation().normalMatrix())
             .draw(actor.mesh());
     }
     for (Shape& wall : m_world.walls()) {
-        m_phongShader.setAmbientColor(wall.colour())
+        m_phongShader.setAmbientColor(0.8f*wall.colour())
+            .setDiffuseColor(wall.colour())
+            .setSpecularColor(0.1f*wall.colour())
             .setTransformationMatrix(wall.transformation())
             .setNormalMatrix(wall.transformation().normalMatrix())
             .draw(wall.mesh());

@@ -217,9 +217,9 @@ void CollisionSim::Actor::collideWorld(const Magnum::Range3D& boundaries) {
     if (collisions==std::array<Collision,3>{Collision::None,Collision::None,Collision::None}) {
         return;
     }
-    Corrade::Utility::Debug{} << "Collision with world detected, normal = " << normal;
+    // Corrade::Utility::Debug{} << "Collision with world detected, normal = " << normal;
     if (Magnum::Math::dot(m_linearVelocity, normal) > 0.0f) {
-        Corrade::Utility::Debug{} << "Velocity points away from the wall, skipping this collision";
+        // Corrade::Utility::Debug{} << "Velocity points away from the wall, skipping this collision";
         return;
     }
     const Magnum::Vector3 collidingVertexWorld{
@@ -227,7 +227,7 @@ void CollisionSim::Actor::collideWorld(const Magnum::Range3D& boundaries) {
         vertexPositionsWorld()[1][collidingVertexIndex],
         vertexPositionsWorld()[2][collidingVertexIndex]
     };
-    Corrade::Utility::Debug{} << "Before: v = " << m_linearVelocity;
+    // Corrade::Utility::Debug{} << "Before: v = " << m_linearVelocity;
     const Magnum::Vector3 radius = collidingVertexWorld - transformation().translation();
     const auto a = Magnum::Math::cross(radius, normal);
     const auto b = m_inertiaInv * a;
@@ -235,20 +235,20 @@ void CollisionSim::Actor::collideWorld(const Magnum::Range3D& boundaries) {
     const auto d = Magnum::Math::dot(c, normal);
     float impulse = (-1.0f - Constants::RestitutionCoefficient) * Magnum::Math::dot(m_linearVelocity, normal) / (1.0f/m_mass + d);
 
-    Corrade::Utility::Debug{} << "impulse = " << impulse;
+    // Corrade::Utility::Debug{} << "impulse = " << impulse;
 
     m_linearVelocity += (impulse / m_mass) * normal;
     m_angularVelocity += impulse * m_inertiaInv * a;
 
     // TODO: implement better resting condition
     if (normal.y() > 0 && m_linearVelocity.y() > 0 && m_linearVelocity.y() < 0.1) {
-        Corrade::Utility::Debug{} << "Resting on the floor, resetting vy to 0";
+        // Corrade::Utility::Debug{} << "Resting on the floor, resetting vy to 0";
         m_linearVelocity[1]=0;
     }
 
     m_linearMomentum = m_mass * m_linearVelocity;
     m_angularMomentum = m_inertiaInv.inverted() * m_angularVelocity;
-    Corrade::Utility::Debug{} << "After: v = " << m_linearVelocity;
+    // Corrade::Utility::Debug{} << "After: v = " << m_linearVelocity;
 
 }
 
