@@ -69,7 +69,7 @@ Magnum::Range3D CollisionSim::Shape::axisAlignedBoundingBox() {
         {m_vertexPositionsWorld[0][0], m_vertexPositionsWorld[1][0],m_vertexPositionsWorld[2][0]},
         {m_vertexPositionsWorld[0][0], m_vertexPositionsWorld[1][0],m_vertexPositionsWorld[2][0]}
     };
-    for (size_t iVertex{1}; iVertex<m_vertexPositionsWorld.size(); ++iVertex) {
+    for (size_t iVertex{1}; iVertex<m_vertexPositionsWorld[0].size(); ++iVertex) {
         for (size_t axis{0}; axis<3; ++axis) {
             if (m_vertexPositionsWorld[axis][iVertex] < box.min()[axis]) {
                 box.min()[axis] = m_vertexPositionsWorld[axis][iVertex];

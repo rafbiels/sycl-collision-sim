@@ -29,15 +29,18 @@ class Actor : public Shape {
         Actor(Magnum::Trade::MeshData&& mesh);
 
         float mass() const {return m_mass;}
+        const Magnum::Vector3& linearVelocity() const {return m_linearVelocity;}
+        const Magnum::Vector3& angularVelocity() const {return m_angularVelocity;}
+        const Magnum::Matrix3& inertiaInv() const {return m_inertiaInv;}
 
         /// Apply a force to the centre of mass
         void addForce(const Magnum::Vector3& force);
         /// Apply a force to a given point in the body coordinate system
         void addForce(const Magnum::Vector3& force, const Magnum::Vector3& point);
+        /// Add linear and angular velocity and recalculate the momenta
+        void addVelocity(const Magnum::Vector3& linear, const Magnum::Vector3& angular);
         /// Process forces and state to compute new state after time \c dtime
         void computeState(float dtime);
-        /// Check world boundary collisions and apply the collision physics
-        void collideWorld(const Magnum::Range3D& boundaries);
 
     private:
         float m_mass{0};

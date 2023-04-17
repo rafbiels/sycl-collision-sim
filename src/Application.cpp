@@ -6,6 +6,7 @@
 
 #include "Application.h"
 #include "Actor.h"
+#include "CollisionCalculator.h"
 #include "Constants.h"
 #include "Shape.h"
 #include "Util.h"
@@ -151,9 +152,12 @@ void CollisionSim::Application::compute() {
         m_computeFrameTimeSec.add(frameTimeSec);
     }
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
+
+    // Process world collision
+    CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
+
+    // Add global forces like gravity
     for (Actor& actor : m_actors) {
-        // Process world collision
-        actor.collideWorld(m_world.boundaries());
         // Add gravity
         actor.addForce({0.0f, m_world.gravity() * actor.mass(), 0.0f});
         // Add arbitrary extra force for testing the simulation
