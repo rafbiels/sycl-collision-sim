@@ -39,31 +39,7 @@ m_computeTask{[this]{compute();}}
     setMinimalLoopPeriod(0);
     setSwapInterval(0);
 
-    using namespace Magnum::Math::Literals;
-
-    constexpr static Magnum::Color3 defaultColour{64.0f/255.0f, 106.0f/255.0f, 128.0f/255.0f};
-
-    m_actors.reserve(4);
-    // Add a cube
-    Actor& cube = m_actors.emplace_back(
-        CollisionSim::ActorFactory::cube(1.0));
-    cube.transformation() = Magnum::Matrix4::translation({-6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
-    cube.colour(defaultColour);
-    // Add a sphere
-    Actor& sphere = m_actors.emplace_back(
-        CollisionSim::ActorFactory::sphere(2.0, 2));
-    sphere.transformation() = Magnum::Matrix4::translation({-2.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
-    sphere.colour(defaultColour);
-    // Add a cylinder
-    Actor& cylinder = m_actors.emplace_back(
-        CollisionSim::ActorFactory::cylinder(1.2, 4, 20, 1.0));
-    cylinder.transformation() = Magnum::Matrix4::translation({2.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
-    cylinder.colour(defaultColour);
-    // Add a cone
-    Actor& cone = m_actors.emplace_back(
-        CollisionSim::ActorFactory::cone(1.0, 4, 20, 1.0));
-    cone.transformation() = Magnum::Matrix4::translation({6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
-    cone.colour(defaultColour);
+    createActors();
 
     m_textRenderer.newText("cfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -162,9 +138,50 @@ void CollisionSim::Application::compute() {
         actor.addForce({0.0f, m_world.gravity() * actor.mass(), 0.0f});
         // Add arbitrary extra force for testing the simulation
         if (wallTimeSec < 0.1) {
-            actor.addForce({0.0f, 0.0f, 100.0f*actor.mass()}, {0.0f,0.0f,0.0f});
+            actor.addForce({100.0f*actor.mass(), 0.0f, 0.0f}, {0.0f,0.0f,0.0f});
         }
         actor.computeState(Constants::RealTimeScale * frameTimeSec);
+    }
+}
+
+// -----------------------------------------------------------------------------
+void CollisionSim::Application::createActors() {
+    using namespace Magnum::Math::Literals;
+
+    constexpr static std::array<Magnum::Color3, 3> colours{
+        Magnum::Color3{64.0f/255.0f, 106.0f/255.0f, 128.0f/255.0f},
+        Magnum::Color3{65.0f/255.0f, 129.0f/255.0f, 97.0f/255.0f},
+        Magnum::Color3{129.0f/255.0f, 65.0f/255.0f, 108.0f/255.0f}
+    };
+
+    const float xmin{m_world.boundaries().min().x()};
+    const float xmax{m_world.boundaries().max().x()};
+    const float zmin{m_world.boundaries().min().z()};
+    const float zmax{m_world.boundaries().max().z()};
+    const float xrange{xmax-xmin};
+    const float zrange{zmax-zmin};
+    const size_t gridSideN{4};
+    const float dx{xrange/(gridSideN)};
+    const float dz{zrange/(gridSideN)};
+    auto generator = [](size_t index){
+        size_t mod = index % 4;
+        switch (mod) {
+            case 0: return CollisionSim::ActorFactory::cube(0.7); break;
+            case 1: return CollisionSim::ActorFactory::sphere(1.0); break;
+            case 2: return CollisionSim::ActorFactory::cylinder(0.8); break;
+            case 3: return CollisionSim::ActorFactory::cone(0.9); break;
+            default: return CollisionSim::ActorFactory::cube(0.7); break;
+        }
+    };
+    m_actors.reserve(gridSideN*gridSideN);
+    for (size_t i{0}; i<gridSideN*gridSideN; ++i) {
+        m_actors.emplace_back(generator(i));
+        m_actors.back().transformation(
+            Magnum::Matrix4::translation({xmin+dx*(0.5f+i/(gridSideN)),5.0,zmin+dz*(0.5f+i%(gridSideN))}) *
+            Magnum::Matrix4::rotationX(20.0_degf*i) *
+            Magnum::Matrix4::rotationY(15.0_degf*i)
+        );
+        m_actors.back().colour(colours[i % colours.size()]);
     }
 }
 

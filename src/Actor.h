@@ -60,16 +60,16 @@ class Actor : public Shape {
 
 namespace ActorFactory {
     Actor cube(float scale);
-    Actor sphere(float scale, unsigned int subdivisions);
+    Actor sphere(float scale, unsigned int subdivisions=2);
     Actor cylinder(float scale,
-                   unsigned int rings,
-                   unsigned int segments,
-                   float halfLength,
+                   unsigned int rings=4,
+                   unsigned int segments=20,
+                   float halfLength=1.0,
                    Magnum::Primitives::CylinderFlags flags=Magnum::Primitives::CylinderFlag::CapEnds);
     Actor cone(float scale,
-               unsigned int rings,
-               unsigned int segments,
-               float halfLength,
+               unsigned int rings=4,
+               unsigned int segments=20,
+               float halfLength=1.0,
                Magnum::Primitives::ConeFlags flags=Magnum::Primitives::ConeFlag::CapEnd);
 }
 

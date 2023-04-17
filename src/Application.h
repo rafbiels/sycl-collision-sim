@@ -28,6 +28,7 @@ class Application final : public Magnum::Platform::Application {
         void tickEvent() override;
         void drawEvent() override;
         void compute();
+        void createActors();
 
         Magnum::Shaders::PhongGL m_phongShader;
 
