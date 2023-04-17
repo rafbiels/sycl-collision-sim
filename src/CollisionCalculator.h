@@ -15,6 +15,7 @@
 namespace CollisionSim::CollisionCalculator {
 
 void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries);
+void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices);
 
 } // namespace CollisionSim::CollisionCalculator
 

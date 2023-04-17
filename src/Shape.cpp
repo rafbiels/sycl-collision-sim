@@ -21,6 +21,7 @@ CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
         m_vertexPositions[2].push_back(vertex[2]);
     }
     m_vertexPositionsWorld = m_vertexPositions;
+    m_numVertices = m_vertexPositions.size();
 }
 
 // -----------------------------------------------------------------------------
@@ -54,12 +55,17 @@ void CollisionSim::Shape::colour(const Magnum::Color3& colour) {
 }
 
 // -----------------------------------------------------------------------------
-const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositions() {
+size_t CollisionSim::Shape::numVertices() const {
+    return m_numVertices;
+}
+
+// -----------------------------------------------------------------------------
+const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositions() const {
     return m_vertexPositions;
 }
 
 // -----------------------------------------------------------------------------
-const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorld() {
+const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorld() const {
     return m_vertexPositionsWorld;
 }
 

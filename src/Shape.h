@@ -31,11 +31,13 @@ class Shape {
         Magnum::Color3& colour();
         void colour(const Magnum::Color3& colour);
 
+        size_t numVertices() const;
+
         /// Returns SoA vertex positions in body coordinate system
-        const std::array<std::vector<float>,3>& vertexPositions();
+        const std::array<std::vector<float>,3>& vertexPositions() const;
 
         /// Returns SoA vertex positions in world coordinate system
-        const std::array<std::vector<float>,3>& vertexPositionsWorld();
+        const std::array<std::vector<float>,3>& vertexPositionsWorld() const;
 
         /// Return the bounding box in world coordinate system
         Magnum::Range3D axisAlignedBoundingBox();
@@ -53,6 +55,8 @@ class Shape {
         std::array<std::vector<float>,3> m_vertexPositions;
         /// SoA vertex data in world coordinate system
         std::array<std::vector<float>,3> m_vertexPositionsWorld;
+        /// Constant number of vertices, calculated at construction
+        size_t m_numVertices{0};
 };
 
 } // namespace CollisionSim

@@ -40,6 +40,8 @@ m_computeTask{[this]{compute();}}
     setSwapInterval(0);
 
     createActors();
+    // Kernel warm-up
+    CollisionCalculator::collideWorldParallel(m_actors, m_world.boundaries(), m_numAllVertices);
 
     m_textRenderer.newText("cfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -131,6 +133,7 @@ void CollisionSim::Application::compute() {
 
     // Process world collision
     CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
+    CollisionCalculator::collideWorldParallel(m_actors, m_world.boundaries(), m_numAllVertices);
 
     // Add global forces like gravity
     for (Actor& actor : m_actors) {
@@ -160,7 +163,7 @@ void CollisionSim::Application::createActors() {
     const float zmax{m_world.boundaries().max().z()};
     const float xrange{xmax-xmin};
     const float zrange{zmax-zmin};
-    const size_t gridSideN{4};
+    const size_t gridSideN{3};
     const float dx{xrange/(gridSideN)};
     const float dz{zrange/(gridSideN)};
     auto generator = [](size_t index){
@@ -182,6 +185,7 @@ void CollisionSim::Application::createActors() {
             Magnum::Matrix4::rotationY(15.0_degf*i)
         );
         m_actors.back().colour(colours[i % colours.size()]);
+        m_numAllVertices += m_actors.back().numVertices();
     }
 }
 

@@ -7,7 +7,11 @@
 #include "CollisionCalculator.h"
 #include "Constants.h"
 #include <Corrade/Utility/Debug.h>
+#include <sycl/sycl.hpp>
 #include <limits>
+#include <numeric>
+
+class world_collision_detect;
 
 namespace CollisionSim::CollisionCalculator {
 
@@ -90,6 +94,68 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
         }
         // Corrade::Utility::Debug{} << "After: v = " << actor.linearVelocity();
     }
+}
+
+void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices) {
+    const std::array<float,6> boundaries{
+        worldBoundaries.min()[0], worldBoundaries.max()[0],
+        worldBoundaries.min()[1], worldBoundaries.max()[1],
+        worldBoundaries.min()[2], worldBoundaries.max()[2],
+    };
+    const size_t numActors{actors.size()};
+
+    std::array<std::vector<float>,3> allVertices;
+    std::vector<size_t> actorIndices;
+    actorIndices.reserve(numAllVertices);
+    allVertices[0].reserve(numAllVertices);
+    allVertices[1].reserve(numAllVertices);
+    allVertices[2].reserve(numAllVertices);
+    for (size_t iActor{0}; iActor<numActors; ++iActor) {
+        const auto& vertices = actor[iActor].vertexPositionsWorld();
+        actorIndices.insert(actorIndices.end(), vertices.size(), iActor);
+        allVertices[0].insert(allVertices[0].end(), vertices[0].begin(), vertices[0].end());
+        allVertices[1].insert(allVertices[1].end(), vertices[1].begin(), vertices[1].end());
+        allVertices[2].insert(allVertices[2].end(), vertices[2].begin(), vertices[2].end());
+    }
+
+    enum class Collision : uint8_t {
+        None = 0,
+        Xmin = 1,
+        Xmax = 1<<1,
+        Ymin = 1<<2,
+        Ymax = 1<<3,
+        Zmin = 1<<4,
+        Zmax = 1<<5
+    };
+    std::vector<uint8_t> collisions(numAllVertices, static_cast<uint8_t>(Collision::None));
+
+    sycl::queue queue{sycl::gpu_selector_v};
+    try {
+        sycl::buffer<float,1> boundariesBuf{boundaries.data(), 6};
+        sycl::buffer<float,1> vxBuf{allVertices[0].data(), numAllVertices};
+        sycl::buffer<float,1> vyBuf{allVertices[1].data(), numAllVertices};
+        sycl::buffer<float,1> vzBuf{allVertices[2].data(), numAllVertices};
+        sycl::buffer<uint8_t,1> collisionsBuf{collisions.data(), numAllVertices};
+        queue.submit([&](sycl::handler& cgh){
+            sycl::accessor boundariesAcc{boundariesBuf, cgh, sycl::read_only};
+            sycl::accessor vxAcc{vxBuf, cgh, sycl::read_only};
+            sycl::accessor vyAcc{vyBuf, cgh, sycl::read_only};
+            sycl::accessor vzAcc{vzBuf, cgh, sycl::read_only};
+            sycl::accessor collisionsAcc{collisionsBuf, cgh, sycl::write_only, sycl::no_init};
+            cgh.parallel_for<world_collision_detect>(numAllVertices, [=](sycl::id<1> id){
+                collisionsAcc[id] |= (uint8_t{vxAcc[id] < boundariesAcc[0]} << 0);
+                collisionsAcc[id] |= (uint8_t{vxAcc[id] > boundariesAcc[1]} << 1);
+                collisionsAcc[id] |= (uint8_t{vyAcc[id] < boundariesAcc[2]} << 2);
+                collisionsAcc[id] |= (uint8_t{vyAcc[id] > boundariesAcc[3]} << 3);
+                collisionsAcc[id] |= (uint8_t{vzAcc[id] < boundariesAcc[4]} << 4);
+                collisionsAcc[id] |= (uint8_t{vzAcc[id] > boundariesAcc[5]} << 5);
+            });
+        });
+        queue.wait_and_throw();
+    } catch (const std::exception& ex) {
+        Corrade::Utility::Error{} << "Exception caught: " << ex.what();
+    }
+    // Corrade::Utility::Debug{} << "Collisions: " << collisions;
 }
 
 } // namespace CollisionSim::CollisionCalculator

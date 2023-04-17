@@ -44,6 +44,8 @@ class Application final : public Magnum::Platform::Application {
         Util::MovingAverage<float> m_renderFrameTimeSec;
         Util::MovingAverage<float> m_computeFrameTimeSec;
         std::mutex m_computeFrameTimeSecMutex;
+        /// Constant count of all vertices calculated at initialisation
+        size_t m_numAllVertices;
 };
 } // namespace CollisionSim
 
