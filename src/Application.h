@@ -12,12 +12,12 @@
 #include "Util.h"
 #include "World.h"
 
-#include <Corrade/Containers/Pointer.h>
 #include <Magnum/Platform/Sdl2Application.h>
 #include <Magnum/Shaders/PhongGL.h>
+#include <Corrade/Containers/Pointer.h>
 
-#include <memory>
 #include <vector>
+#include <mutex>
 
 namespace CollisionSim {
 class Application final : public Magnum::Platform::Application {
@@ -27,17 +27,22 @@ class Application final : public Magnum::Platform::Application {
     private:
         void tickEvent() override;
         void drawEvent() override;
+        void compute();
 
         Magnum::Shaders::PhongGL m_phongShader;
 
         World m_world;
         std::vector<Actor> m_actors;
 
-        Util::Timer m_frameTimer;
+        Util::Timer m_renderFrameTimer;
+        Util::Timer m_computeFrameTimer;
         Util::Timer m_textUpdateTimer;
         Util::Timer m_wallClock;
+        Util::RepeatTask m_computeTask;
         TextRenderer m_textRenderer;
-        Util::MovingAverage<float> m_frameTimeSec;
+        Util::MovingAverage<float> m_renderFrameTimeSec;
+        Util::MovingAverage<float> m_computeFrameTimeSec;
+        std::mutex m_computeFrameTimeSecMutex;
 };
 } // namespace CollisionSim
 

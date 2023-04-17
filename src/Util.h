@@ -15,6 +15,9 @@
 #include <chrono>
 #include <deque>
 #include <numeric>
+#include <memory>
+#include <thread>
+#include <functional>
 
 namespace CollisionSim::Util {
 
@@ -44,6 +47,25 @@ class Timer {
         bool stepIfElapsed(duration_t duration);
     private:
         time_point_t m_currentTime;
+};
+
+class RepeatTask {
+    public:
+        RepeatTask(std::function<void()>&& callback);
+        ~RepeatTask();
+        RepeatTask(const RepeatTask&) = delete;
+        RepeatTask(RepeatTask&&) = delete;
+        RepeatTask& operator=(const RepeatTask&) = delete;
+        RepeatTask& operator=(RepeatTask&&) = delete;
+        void start(Timer::duration_t interval);
+        void stop();
+    private:
+        void run();
+        Timer m_timer;
+        Timer::duration_t m_interval{0};
+        std::unique_ptr<std::thread> m_thread;
+        std::function<void()> m_callback;
+        bool m_keepRunning{true};
 };
 
 template<typename T>

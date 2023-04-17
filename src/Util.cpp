@@ -7,6 +7,7 @@
 #include "Util.h"
 #include <Corrade/Utility/Debug.h>
 #include <Magnum/Math/Algorithms/GramSchmidt.h>
+#include <stdexcept>
 
 namespace CollisionSim::Util {
 
@@ -32,6 +33,47 @@ bool Timer::stepIfElapsed(Timer::duration_t duration) {
     if (peek() < duration) {return false;}
     reset();
     return true;
+}
+
+// -----------------------------------------------------------------------------
+RepeatTask::RepeatTask(std::function<void()>&& callback)
+: m_callback(std::move(callback)) {}
+
+// -----------------------------------------------------------------------------
+RepeatTask::~RepeatTask() {
+    stop();
+}
+
+// -----------------------------------------------------------------------------
+void RepeatTask::start(Timer::duration_t interval) {
+    if (m_thread!=nullptr) {
+        throw std::runtime_error("RepeatTask::start called on already running task");
+    }
+    m_interval = interval;
+    m_keepRunning = true;
+    m_timer.reset();
+    m_thread = std::make_unique<std::thread>([this]{run();});
+}
+
+// -----------------------------------------------------------------------------
+void RepeatTask::stop() {
+    m_keepRunning = false;
+    if (m_thread==nullptr) {return;}
+    m_thread->join();
+    m_thread.reset();
+}
+
+// -----------------------------------------------------------------------------
+void RepeatTask::run() {
+    while (m_keepRunning) {
+        Timer::duration_t timeLeft{m_interval - m_timer.peek()};
+        if (timeLeft < Timer::duration_t{0}) {
+            m_timer.reset();
+            m_callback();
+        } else {
+            std::this_thread::sleep_for(timeLeft);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------

@@ -10,12 +10,16 @@
 #include "Util.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Vector3.h>
+#include <chrono>
 #include <string_view>
 
 namespace CollisionSim::Constants {
 
 /// Application name shown in the window title bar
 constexpr static std::string_view ApplicationName{"Collision Simulation"};
+
+/// Minimum amount of time between two calls to compute state of the simulation
+constexpr static Util::Timer::duration_t ComputeInterval{std::chrono::microseconds{500}};
 
 /// Minimum amount of time between two updates of the on-screen text (e.g. FPS counter)
 constexpr static Util::Timer::duration_t TextUpdateInterval{std::chrono::milliseconds{200}};

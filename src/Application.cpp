@@ -10,26 +10,24 @@
 #include "Shape.h"
 #include "Util.h"
 #include "World.h"
-#include <Corrade/Utility/FormatStl.h>
+
+#include <Magnum/Magnum.h>
 #include <Magnum/GL/Context.h>
 #include <Magnum/GL/DefaultFramebuffer.h>
 #include <Magnum/GL/Renderer.h>
-
-#include <Magnum/Magnum.h>
-
-#include <Corrade/Containers/StringStlView.h>
-#include <Corrade/Utility/Debug.h>
-#include <chrono>
-#include <memory>
-
 #include <Magnum/Math/Color.h>
+
+#include <Corrade/Utility/FormatStl.h>
+#include <Corrade/Containers/StringStlView.h>
 
 // -----------------------------------------------------------------------------
 CollisionSim::Application::Application(const Arguments& arguments)
 : Magnum::Platform::Application{arguments, Configuration{}.setTitle(Constants::ApplicationName)},
 m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
-m_frameTimeSec{Constants::FrameTimeCounterWindow}
+m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
+m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
+m_computeTask{[this]{compute();}}
 {
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::FaceCulling);
@@ -66,16 +64,21 @@ m_frameTimeSec{Constants::FrameTimeCounterWindow}
     cone.transformation() = Magnum::Matrix4::translation({6.0,5.0,0.0}) * Magnum::Matrix4::rotationX(30.0_degf);
     cone.colour(defaultColour);
 
-    m_textRenderer.newText("fps",
+    m_textRenderer.newText("cfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f));
-    m_textRenderer.newText("clock",
+    m_textRenderer.newText("rfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.9f}));
+    m_textRenderer.newText("clock",
+        Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
+        Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.8f}));
 
+    m_renderFrameTimer.reset();
+    m_computeFrameTimer.reset();
     m_textUpdateTimer.reset();
-    m_frameTimer.reset();
     m_wallClock.reset();
+    m_computeTask.start(Constants::ComputeInterval);
 }
 
 // -----------------------------------------------------------------------------
@@ -83,27 +86,22 @@ void CollisionSim::Application::tickEvent() {
     using namespace Magnum::Math::Literals;
     using FloatSecond = std::chrono::duration<float,std::ratio<1>>;
 
-    float frameTimeSec{std::chrono::duration_cast<FloatSecond>(m_frameTimer.step()).count()};
-    m_frameTimeSec.add(frameTimeSec);
+    float frameTimeSec{std::chrono::duration_cast<FloatSecond>(m_renderFrameTimer.step()).count()};
+    m_renderFrameTimeSec.add(frameTimeSec);
 
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
 
     if (m_textUpdateTimer.stepIfElapsed(Constants::TextUpdateInterval)) {
-        m_textRenderer.get("fps").renderer().render(Corrade::Utility::formatString("FPS: {:.1f}", 1.0/m_frameTimeSec.value()));
-        m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Time: {:.1f}s", wallTimeSec));
-        m_frameTimeSec.reset();
-    }
-
-    for (Actor& actor : m_actors) {
-        // Process world collision
-        actor.collideWorld(m_world.boundaries());
-        // Add gravity
-        actor.addForce({0.0f, m_world.gravity() * actor.mass(), 0.0f});
-        // Add arbitrary extra force for testing the simulation
-        if (wallTimeSec < 0.1) {
-            actor.addForce({0.0f, 0.0f, 100.0f*actor.mass()}, {0.0f,0.0f,0.0f});
+        float cfps{0.0f};
+        {
+            std::scoped_lock lock{m_computeFrameTimeSecMutex};
+            cfps = 1.0f/m_computeFrameTimeSec.value();
+            m_computeFrameTimeSec.reset();
         }
-        actor.computeState(Constants::RealTimeScale * frameTimeSec);
+        m_textRenderer.get("cfps").renderer().render(Corrade::Utility::formatString("Compute FPS: {:.1f}", cfps));
+        m_textRenderer.get("rfps").renderer().render(Corrade::Utility::formatString("Render FPS: {:.1f}", 1.0/m_renderFrameTimeSec.value()));
+        m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Time: {:.1f}s", wallTimeSec));
+        m_renderFrameTimeSec.reset();
     }
 }
 
@@ -141,6 +139,29 @@ void CollisionSim::Application::drawEvent() {
 
     redraw();
     swapBuffers();
+}
+
+// -----------------------------------------------------------------------------
+void CollisionSim::Application::compute() {
+    using namespace Magnum::Math::Literals;
+    using FloatSecond = std::chrono::duration<float,std::ratio<1>>;
+    float frameTimeSec{std::chrono::duration_cast<FloatSecond>(m_computeFrameTimer.step()).count()};
+    {
+        std::scoped_lock lock{m_computeFrameTimeSecMutex};
+        m_computeFrameTimeSec.add(frameTimeSec);
+    }
+    float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
+    for (Actor& actor : m_actors) {
+        // Process world collision
+        actor.collideWorld(m_world.boundaries());
+        // Add gravity
+        actor.addForce({0.0f, m_world.gravity() * actor.mass(), 0.0f});
+        // Add arbitrary extra force for testing the simulation
+        if (wallTimeSec < 0.1) {
+            actor.addForce({0.0f, 0.0f, 100.0f*actor.mass()}, {0.0f,0.0f,0.0f});
+        }
+        actor.computeState(Constants::RealTimeScale * frameTimeSec);
+    }
 }
 
 // -----------------------------------------------------------------------------
