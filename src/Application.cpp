@@ -132,8 +132,9 @@ void CollisionSim::Application::compute() {
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
 
     // Process world collision
-    CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
+    Corrade::Utility::Debug{} << "--------------------";
     CollisionCalculator::collideWorldParallel(m_actors, m_world.boundaries(), m_numAllVertices);
+    CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
 
     // Add global forces like gravity
     for (Actor& actor : m_actors) {

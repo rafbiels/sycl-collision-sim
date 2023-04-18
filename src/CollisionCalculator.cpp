@@ -13,11 +13,24 @@
 
 class world_collision_detect;
 
+namespace {
+enum class Collision : uint8_t {
+    None = 0,
+    Xmin = 1,
+    Xmax = 1<<1,
+    Ymin = 1<<2,
+    Ymax = 1<<3,
+    Zmin = 1<<4,
+    Zmax = 1<<5
+};
+}
+
 namespace CollisionSim::CollisionCalculator {
 
 void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries) {
+    int iActor{-1};
     for (auto& actor : actors) {
-        enum class Collision : short {None=-1, Xmin=0, Xmax, Ymin, Ymax, Zmin, Zmax};
+        ++iActor;
         Collision collision{Collision::None};
         size_t collidingVertexIndex{std::numeric_limits<size_t>::max()};
 
@@ -65,6 +78,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
             }
         }
         if (collision==Collision::None) {continue;}
+        Corrade::Utility::Debug{} << "[CPU] actor " << iActor << " collision type " << static_cast<uint8_t>(collision);
         // Corrade::Utility::Debug{} << "Collision with world detected, normal = " << normal;
         if (Magnum::Math::dot(actor.linearVelocity(), normal) > 0.0f) {
             // Corrade::Utility::Debug{} << "Velocity " << actor.linearVelocity() << " points away from the wall, skipping this collision";
@@ -111,22 +125,13 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
     allVertices[1].reserve(numAllVertices);
     allVertices[2].reserve(numAllVertices);
     for (size_t iActor{0}; iActor<numActors; ++iActor) {
-        const auto& vertices = actor[iActor].vertexPositionsWorld();
-        actorIndices.insert(actorIndices.end(), vertices.size(), iActor);
+        const auto& vertices = actors[iActor].vertexPositionsWorld();
+        actorIndices.insert(actorIndices.end(), vertices[0].size(), iActor);
         allVertices[0].insert(allVertices[0].end(), vertices[0].begin(), vertices[0].end());
         allVertices[1].insert(allVertices[1].end(), vertices[1].begin(), vertices[1].end());
         allVertices[2].insert(allVertices[2].end(), vertices[2].begin(), vertices[2].end());
     }
 
-    enum class Collision : uint8_t {
-        None = 0,
-        Xmin = 1,
-        Xmax = 1<<1,
-        Ymin = 1<<2,
-        Ymax = 1<<3,
-        Zmin = 1<<4,
-        Zmax = 1<<5
-    };
     std::vector<uint8_t> collisions(numAllVertices, static_cast<uint8_t>(Collision::None));
 
     sycl::queue queue{sycl::gpu_selector_v};
@@ -143,19 +148,26 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
             sycl::accessor vzAcc{vzBuf, cgh, sycl::read_only};
             sycl::accessor collisionsAcc{collisionsBuf, cgh, sycl::write_only, sycl::no_init};
             cgh.parallel_for<world_collision_detect>(numAllVertices, [=](sycl::id<1> id){
-                collisionsAcc[id] |= (uint8_t{vxAcc[id] < boundariesAcc[0]} << 0);
-                collisionsAcc[id] |= (uint8_t{vxAcc[id] > boundariesAcc[1]} << 1);
-                collisionsAcc[id] |= (uint8_t{vyAcc[id] < boundariesAcc[2]} << 2);
-                collisionsAcc[id] |= (uint8_t{vyAcc[id] > boundariesAcc[3]} << 3);
-                collisionsAcc[id] |= (uint8_t{vzAcc[id] < boundariesAcc[4]} << 4);
-                collisionsAcc[id] |= (uint8_t{vzAcc[id] > boundariesAcc[5]} << 5);
+                collisionsAcc[id] |= (uint8_t{vxAcc[id] <= boundariesAcc[0]} << 0);
+                collisionsAcc[id] |= (uint8_t{vxAcc[id] >= boundariesAcc[1]} << 1);
+                collisionsAcc[id] |= (uint8_t{vyAcc[id] <= boundariesAcc[2]} << 2);
+                collisionsAcc[id] |= (uint8_t{vyAcc[id] >= boundariesAcc[3]} << 3);
+                collisionsAcc[id] |= (uint8_t{vzAcc[id] <= boundariesAcc[4]} << 4);
+                collisionsAcc[id] |= (uint8_t{vzAcc[id] >= boundariesAcc[5]} << 5);
             });
         });
         queue.wait_and_throw();
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
     }
-    // Corrade::Utility::Debug{} << "Collisions: " << collisions;
+    std::unordered_map<size_t, uint8_t> actorCollisions; // {actor index, collision type}
+    for (size_t iVertex{0}; iVertex<numAllVertices; ++iVertex) {
+        if (collisions[iVertex]==0) {continue;}
+        actorCollisions[actorIndices[iVertex]] |= collisions[iVertex];
+    }
+    for (const auto& [iActor,collision] : actorCollisions) {
+        Corrade::Utility::Debug{} << "[GPU] actor " << iActor << " collision type " << static_cast<uint8_t>(collision);
+    }
 }
 
 } // namespace CollisionSim::CollisionCalculator

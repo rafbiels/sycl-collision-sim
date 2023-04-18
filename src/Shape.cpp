@@ -12,6 +12,7 @@ CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
 : m_meshData{std::move(meshData)},
   m_mesh{Magnum::MeshTools::compile(m_meshData)} {
     auto vertices = Shape::meshData().positions3DAsArray();
+    m_numVertices = vertices.size();
     m_vertexPositions[0].reserve(vertices.size());
     m_vertexPositions[1].reserve(vertices.size());
     m_vertexPositions[2].reserve(vertices.size());
@@ -21,7 +22,6 @@ CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
         m_vertexPositions[2].push_back(vertex[2]);
     }
     m_vertexPositionsWorld = m_vertexPositions;
-    m_numVertices = m_vertexPositions.size();
 }
 
 // -----------------------------------------------------------------------------
