@@ -49,6 +49,9 @@ constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
             sycl::float3{data[3],data[4],data[5]},
             sycl::float3{data[6],data[7],data[8]}};
 }
+constexpr Magnum::Vector3 toMagnum(const sycl::float3& vec) {
+    return Magnum::Vector3{vec[0],vec[1],vec[2]};
+}
 constexpr sycl::float3 mvmul(const std::array<sycl::float3,3>& mat, const sycl::float3& vec) {
     return {mat[0][0]*vec[0] + mat[1][0]*vec[1] + mat[2][0]*vec[2],
             mat[0][1]*vec[0] + mat[1][1]*vec[1] + mat[2][1]*vec[2],
@@ -111,7 +114,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
         if (collision==WallCollision::None) {continue;}
         // Corrade::Utility::Debug{} << "WallCollision with world detected, normal = " << normal;
         if (Magnum::Math::dot(actor.linearVelocity(), normal) > 0.0f) {
-            Corrade::Utility::Debug{} << "Velocity " << actor.linearVelocity() << " points away from the wall, skipping this collision";
+            // Corrade::Utility::Debug{} << "Velocity " << actor.linearVelocity() << " points away from the wall, skipping this collision";
             continue;
         }
         const Magnum::Vector3 collidingVertexWorld{
@@ -132,17 +135,8 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
         // Corrade::Utility::Debug{} << "impulse = " << impulse;
         Magnum::Vector3 addLinearV = (impulse / actor.mass()) * normal;
         Magnum::Vector3 addAngularV = impulse * b;
-        Corrade::Utility::Debug{} << "=====\nRB/cpu: normal=(" << normal
-            << "), vertex=(" << collidingVertexWorld
-            << "), radius=(" << radius
-            << "),\na=(" << a
-            << "), b=(" << b
-            << "), c=(" << c
-            << "), d=(" << d
-            << "),\naddLinearVelocityAcc[id]=(" << addLinearV
-            << "), addAngularVelocityAcc[id]=(" << addAngularV
-            << ")\n";
         actor.addVelocity(addLinearV, addAngularV);
+        /*
         Corrade::Utility::Debug{} << "[CPU] actor " << iActor
                                   << " collision type " << static_cast<uint8_t>(collision)
                                   << ", results = ("
@@ -152,7 +146,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
                                   << addAngularV[0] << ","
                                   << addAngularV[1] << ","
                                   << addAngularV[2] << ")";
-
+        */
         const float vy{actor.linearVelocity().y()};
         // TODO: implement better resting condition
         if (normal.y() > 0 && vy > 0 && vy < 0.1) {
@@ -254,34 +248,12 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
                 bool ignoreAwayFromWall{sycl::dot(addLinearVelocityAcc[id], normal) > 0.0f};
                 // branchless version of: if (ignoreAwayFromWall) {collisionsAcc[id]=Collision::None;}
                 collisionsAcc[id] = static_cast<WallCollision>(static_cast<uint8_t>(collisionsAcc[id]) * !ignoreAwayFromWall);
-                if (collisionsAcc[id]!=WallCollision::None) {
-                    os << "=====\nRB/gpu: normal=(" << normal
-                       << "), vertex=(" << vertex
-                       << "), radius=(" << radius
-                       << "),\na=(" << a
-                       << "), b=(" << b
-                       << "), c=(" << c
-                       << "), d=(" << d
-                       << "),\naddLinearVelocityAcc[id]=(" << addLinearVelocityAcc[id]
-                       << "), addAngularVelocityAcc[id]=(" << addAngularVelocityAcc[id]
-                       << ")\n";
-                }
             });
         });
         queue.wait_and_throw();
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
     }
-    /*
-    std::unordered_map<size_t, uint8_t> actorCollisions; // {actor index, collision type}
-    for (size_t iVertex{0}; iVertex<numAllVertices; ++iVertex) {
-        if (collisions[iVertex]==0) {continue;}
-        actorCollisions[actorIndices[iVertex]] |= collisions[iVertex];
-    }
-    for (const auto& [iActor,collision] : actorCollisions) {
-        Corrade::Utility::Debug{} << "[GPU] actor " << iActor << " collision type " << static_cast<uint8_t>(collision);
-    }
-    */
     struct CollisionData {
         WallCollision type{WallCollision::None};
         std::vector<sycl::float3> addLinearV;
@@ -294,15 +266,6 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
         data.type |= collisions[iVertex];
         data.addLinearV.push_back(addLinearVelocity[iVertex]);
         data.addAngularV.push_back(addAngularVelocity[iVertex]);
-        // Corrade::Utility::Debug{} << "[GPU] vertex " << iVertex
-        //                           << " collision type " << static_cast<uint8_t>(collisions[iVertex])
-        //                           << ", results = ("
-        //                           << addLinearVelocity[iVertex][0] << ", "
-        //                           << addLinearVelocity[iVertex][1] << ", "
-        //                           << addLinearVelocity[iVertex][2] << "), ()"
-        //                           << addAngularVelocity[iVertex][0] << ", "
-        //                           << addAngularVelocity[iVertex][1] << ", "
-        //                           << addAngularVelocity[iVertex][2] << ")";
     }
     for (const auto& [iActor, data] : actorCollisions) {
         size_t num{data.addLinearV.size()};
@@ -311,6 +274,7 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
         };
         sycl::float3 meanAddLinV = std::accumulate(data.addLinearV.begin(),data.addLinearV.end(),sycl::float3{0.0f},accumulateMean);
         sycl::float3 meanAddAngV = std::accumulate(data.addAngularV.begin(),data.addAngularV.end(),sycl::float3{0.0f},accumulateMean);
+        /*
         Corrade::Utility::Debug{} << "[GPU] actor " << iActor
                                   << " collision type " << static_cast<uint8_t>(data.type)
                                   << ", results = ("
@@ -320,6 +284,14 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
                                   << meanAddAngV[0] << ","
                                   << meanAddAngV[1] << ","
                                   << meanAddAngV[2] << ")";
+        */
+        actors[iActor].addVelocity(toMagnum(meanAddLinV), toMagnum(meanAddAngV));
+        const float vy{actors[iActor].linearVelocity().y()};
+        // TODO: implement better resting condition
+        if ((data.type & WallCollision::Ymin) > 0 && vy > 0 && vy < 0.1) {
+            // Corrade::Utility::Debug{} << "Resting on the floor, resetting vy to 0";
+            actors[iActor].addVelocity({0.0f, -1.0f*vy, 0.0f}, {0.0f, 0.0f, 0.0f});
+        }
     }
 }
 
