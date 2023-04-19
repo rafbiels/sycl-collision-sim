@@ -35,9 +35,9 @@ constexpr uint8_t operator&(WallCollision a, WallCollision b) {
     return static_cast<uint8_t>(a) & static_cast<uint8_t>(b);
 }
 constexpr sycl::float3 wallNormal(WallCollision collision) {
-    return {(collision & WallCollision::Xmax) - (collision & WallCollision::Xmin),
-            (collision & WallCollision::Ymax) - (collision & WallCollision::Ymin),
-            (collision & WallCollision::Zmax) - (collision & WallCollision::Zmin)};
+    return {((collision & WallCollision::Xmax) >> 1) - ((collision & WallCollision::Xmin) >> 0),
+            ((collision & WallCollision::Ymax) >> 3) - ((collision & WallCollision::Ymin) >> 2),
+            ((collision & WallCollision::Zmax) >> 5) - ((collision & WallCollision::Zmin) >> 4)};
 }
 constexpr sycl::float3 toSycl(const Magnum::Vector3& vec) {
     const float (&data)[3] = vec.data();
@@ -132,6 +132,16 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
         // Corrade::Utility::Debug{} << "impulse = " << impulse;
         Magnum::Vector3 addLinearV = (impulse / actor.mass()) * normal;
         Magnum::Vector3 addAngularV = impulse * b;
+        Corrade::Utility::Debug{} << "=====\nRB/cpu: normal=(" << normal
+            << "), vertex=(" << collidingVertexWorld
+            << "), radius=(" << radius
+            << "),\na=(" << a
+            << "), b=(" << b
+            << "), c=(" << c
+            << "), d=(" << d
+            << "),\naddLinearVelocityAcc[id]=(" << addLinearV
+            << "), addAngularVelocityAcc[id]=(" << addAngularV
+            << ")\n";
         actor.addVelocity(addLinearV, addAngularV);
         Corrade::Utility::Debug{} << "[CPU] actor " << iActor
                                   << " collision type " << static_cast<uint8_t>(collision)
@@ -218,6 +228,7 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
             sycl::accessor addLinearVelocityAcc{addLinearVelocityBuf, cgh, sycl::write_only, sycl::no_init};
             sycl::accessor addAngularVelocityAcc{addAngularVelocityBuf, cgh, sycl::write_only, sycl::no_init};
             sycl::accessor collisionsAcc{collisionsBuf, cgh, sycl::write_only, sycl::no_init};
+            auto os = sycl::stream{65536, 1024, cgh};
             cgh.parallel_for<world_collision>(numAllVertices, [=](sycl::id<1> id){
                 // WallCollision collision{WallCollision::None};
                 collisionsAcc[id] |= (uint8_t{vxAcc[id] <= boundariesAcc[0]} << 0);
@@ -243,6 +254,18 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
                 bool ignoreAwayFromWall{sycl::dot(addLinearVelocityAcc[id], normal) > 0.0f};
                 // branchless version of: if (ignoreAwayFromWall) {collisionsAcc[id]=Collision::None;}
                 collisionsAcc[id] = static_cast<WallCollision>(static_cast<uint8_t>(collisionsAcc[id]) * !ignoreAwayFromWall);
+                if (collisionsAcc[id]!=WallCollision::None) {
+                    os << "=====\nRB/gpu: normal=(" << normal
+                       << "), vertex=(" << vertex
+                       << "), radius=(" << radius
+                       << "),\na=(" << a
+                       << "), b=(" << b
+                       << "), c=(" << c
+                       << "), d=(" << d
+                       << "),\naddLinearVelocityAcc[id]=(" << addLinearVelocityAcc[id]
+                       << "), addAngularVelocityAcc[id]=(" << addAngularVelocityAcc[id]
+                       << ")\n";
+                }
             });
         });
         queue.wait_and_throw();
