@@ -16,6 +16,8 @@
 #include <Magnum/Shaders/PhongGL.h>
 #include <Corrade/Containers/Pointer.h>
 
+#include <sycl/sycl.hpp>
+
 #include <vector>
 #include <mutex>
 
@@ -46,6 +48,8 @@ class Application final : public Magnum::Platform::Application {
         std::mutex m_computeFrameTimeSecMutex;
         /// Constant count of all vertices calculated at initialisation
         size_t m_numAllVertices;
+
+        std::unique_ptr<sycl::queue> m_syclQueue;
 };
 } // namespace CollisionSim
 

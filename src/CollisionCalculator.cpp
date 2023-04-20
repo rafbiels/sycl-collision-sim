@@ -35,9 +35,9 @@ constexpr uint8_t operator&(WallCollision a, WallCollision b) {
     return static_cast<uint8_t>(a) & static_cast<uint8_t>(b);
 }
 constexpr sycl::float3 wallNormal(WallCollision collision) {
-    return {((collision & WallCollision::Xmax) >> 1) - ((collision & WallCollision::Xmin) >> 0),
-            ((collision & WallCollision::Ymax) >> 3) - ((collision & WallCollision::Ymin) >> 2),
-            ((collision & WallCollision::Zmax) >> 5) - ((collision & WallCollision::Zmin) >> 4)};
+    return {static_cast<float>(((collision & WallCollision::Xmax) >> 1) - ((collision & WallCollision::Xmin) >> 0)),
+            static_cast<float>(((collision & WallCollision::Ymax) >> 3) - ((collision & WallCollision::Ymin) >> 2)),
+            static_cast<float>(((collision & WallCollision::Zmax) >> 5) - ((collision & WallCollision::Zmin) >> 4))};
 }
 constexpr sycl::float3 toSycl(const Magnum::Vector3& vec) {
     const float (&data)[3] = vec.data();
@@ -157,7 +157,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
     }
 }
 
-void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices) {
+void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices) {
     const std::array<float,6> boundaries{
         worldBoundaries.min()[0], worldBoundaries.max()[0],
         worldBoundaries.min()[1], worldBoundaries.max()[1],
@@ -195,7 +195,6 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
 
     std::vector<WallCollision> collisions(numAllVertices, WallCollision::None);
 
-    sycl::queue queue{sycl::gpu_selector_v};
     try {
         sycl::buffer<float,1> boundariesBuf{boundaries.data(), 6};
         sycl::buffer<float,1> vxBuf{allVertices[0]};
@@ -209,7 +208,7 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
         sycl::buffer<sycl::float3,1> linearVelocityBuf{linearVelocity};
         sycl::buffer<sycl::float3,1> addLinearVelocityBuf{addLinearVelocity};
         sycl::buffer<sycl::float3,1> addAngularVelocityBuf{addAngularVelocity};
-        queue.submit([&](sycl::handler& cgh){
+        queue->submit([&](sycl::handler& cgh){
             sycl::accessor boundariesAcc{boundariesBuf, cgh, sycl::read_only};
             sycl::accessor vxAcc{vxBuf, cgh, sycl::read_only};
             sycl::accessor vyAcc{vyBuf, cgh, sycl::read_only};
@@ -222,16 +221,13 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
             sycl::accessor addLinearVelocityAcc{addLinearVelocityBuf, cgh, sycl::write_only, sycl::no_init};
             sycl::accessor addAngularVelocityAcc{addAngularVelocityBuf, cgh, sycl::write_only, sycl::no_init};
             sycl::accessor collisionsAcc{collisionsBuf, cgh, sycl::write_only, sycl::no_init};
-            auto os = sycl::stream{65536, 1024, cgh};
             cgh.parallel_for<world_collision>(numAllVertices, [=](sycl::id<1> id){
-                // WallCollision collision{WallCollision::None};
                 collisionsAcc[id] |= (uint8_t{vxAcc[id] <= boundariesAcc[0]} << 0);
                 collisionsAcc[id] |= (uint8_t{vxAcc[id] >= boundariesAcc[1]} << 1);
                 collisionsAcc[id] |= (uint8_t{vyAcc[id] <= boundariesAcc[2]} << 2);
                 collisionsAcc[id] |= (uint8_t{vyAcc[id] >= boundariesAcc[3]} << 3);
                 collisionsAcc[id] |= (uint8_t{vzAcc[id] <= boundariesAcc[4]} << 4);
                 collisionsAcc[id] |= (uint8_t{vzAcc[id] >= boundariesAcc[5]} << 5);
-                // collisionsAcc[id] = collision;
                 sycl::float3 normal = wallNormal(collisionsAcc[id]);
                 uint16_t iActor = actorIndicesAcc[id];
                 sycl::float3 vertex{vxAcc[id],vyAcc[id],vzAcc[id]};
@@ -249,8 +245,7 @@ void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& wor
                 // branchless version of: if (ignoreAwayFromWall) {collisionsAcc[id]=Collision::None;}
                 collisionsAcc[id] = static_cast<WallCollision>(static_cast<uint8_t>(collisionsAcc[id]) * !ignoreAwayFromWall);
             });
-        });
-        queue.wait_and_throw();
+        }).wait_and_throw();
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
     }

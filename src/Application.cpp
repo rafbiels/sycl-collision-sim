@@ -28,7 +28,8 @@ m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
-m_computeTask{[this]{compute();}}
+m_computeTask{[this]{compute();}},
+m_syclQueue{std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{})}
 {
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::FaceCulling);
@@ -41,7 +42,7 @@ m_computeTask{[this]{compute();}}
 
     createActors();
     // Kernel warm-up
-    CollisionCalculator::collideWorldParallel(m_actors, m_world.boundaries(), m_numAllVertices);
+    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_world.boundaries(), m_numAllVertices);
 
     m_textRenderer.newText("cfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -133,7 +134,7 @@ void CollisionSim::Application::compute() {
 
     // Process world collision
     // Corrade::Utility::Debug{} << "--------------------";
-    CollisionCalculator::collideWorldParallel(m_actors, m_world.boundaries(), m_numAllVertices);
+    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_world.boundaries(), m_numAllVertices);
     // CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
 
     // Add global forces like gravity

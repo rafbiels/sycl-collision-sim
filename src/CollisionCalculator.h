@@ -10,12 +10,13 @@
 #include "Actor.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Range.h>
+#include <sycl/sycl.hpp>
 #include <vector>
 
 namespace CollisionSim::CollisionCalculator {
 
 void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries);
-void collideWorldParallel(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices);
+void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices);
 
 } // namespace CollisionSim::CollisionCalculator
 

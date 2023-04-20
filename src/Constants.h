@@ -19,7 +19,7 @@ namespace CollisionSim::Constants {
 constexpr static std::string_view ApplicationName{"Collision Simulation"};
 
 /// Minimum amount of time between two calls to compute state of the simulation
-constexpr static Util::Timer::duration_t ComputeInterval{std::chrono::microseconds{500}};
+constexpr static Util::Timer::duration_t ComputeInterval{std::chrono::microseconds{0}};
 
 /// Minimum amount of time between two updates of the on-screen text (e.g. FPS counter)
 constexpr static Util::Timer::duration_t TextUpdateInterval{std::chrono::milliseconds{200}};
