@@ -12,6 +12,7 @@
 #include <Magnum/Math/Vector4.h>
 #include <Magnum/Math/Matrix3.h>
 #include <Magnum/Math/Matrix4.h>
+#include <sycl/sycl.hpp>
 #include <chrono>
 #include <deque>
 #include <numeric>
@@ -97,6 +98,30 @@ Magnum::Matrix3 round(const Magnum::Matrix3& m);
 Magnum::Matrix4 round(const Magnum::Matrix4& m);
 
 void orthonormaliseRotation(Magnum::Matrix4& trfMatrix);
+
+/// Magnum<->SYCL vector and matrix conversions
+///@{
+constexpr sycl::float3 toSycl(const Magnum::Vector3& vec) {
+    const float (&data)[3] = vec.data();
+    return sycl::float3{data[0],data[1],data[2]};
+}
+constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
+    const float (&data)[9] = mat.data();
+    return {sycl::float3{data[0],data[1],data[2]},
+            sycl::float3{data[3],data[4],data[5]},
+            sycl::float3{data[6],data[7],data[8]}};
+}
+constexpr Magnum::Vector3 toMagnum(const sycl::float3& vec) {
+    return Magnum::Vector3{vec[0],vec[1],vec[2]};
+}
+///@}
+
+/// SYCL matrix-vector multiplication
+constexpr sycl::float3 mvmul(const std::array<sycl::float3,3>& mat, const sycl::float3& vec) {
+    return {mat[0][0]*vec[0] + mat[1][0]*vec[1] + mat[2][0]*vec[2],
+            mat[0][1]*vec[0] + mat[1][1]*vec[1] + mat[2][1]*vec[2],
+            mat[0][2]*vec[0] + mat[1][2]*vec[1] + mat[2][2]*vec[2]};
+}
 
 } // namespace CollisionSim::Util
 

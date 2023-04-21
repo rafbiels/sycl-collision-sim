@@ -10,6 +10,7 @@
 #include "Actor.h"
 #include "TextRenderer.h"
 #include "Util.h"
+#include "State.h"
 #include "World.h"
 
 #include <Magnum/Platform/Sdl2Application.h>
@@ -25,6 +26,7 @@ namespace CollisionSim {
 class Application final : public Magnum::Platform::Application {
     public:
         explicit Application(const Arguments& arguments);
+        virtual ~Application() {m_computeTask.stop();}
 
     private:
         void tickEvent() override;
@@ -47,8 +49,9 @@ class Application final : public Magnum::Platform::Application {
         Util::MovingAverage<float> m_computeFrameTimeSec;
         std::mutex m_computeFrameTimeSecMutex;
         /// Constant count of all vertices calculated at initialisation
-        size_t m_numAllVertices;
+        size_t m_numAllVertices{0};
 
+        std::unique_ptr<State> m_state;
         std::unique_ptr<sycl::queue> m_syclQueue;
 };
 } // namespace CollisionSim

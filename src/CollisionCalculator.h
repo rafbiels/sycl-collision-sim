@@ -8,6 +8,7 @@
 #define COLLISION_SIM_COLLISIONCALCULATOR
 
 #include "Actor.h"
+#include "State.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Range.h>
 #include <sycl/sycl.hpp>
@@ -16,7 +17,7 @@
 namespace CollisionSim::CollisionCalculator {
 
 void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries);
-void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries, size_t numAllVertices);
+void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State* state);
 
 } // namespace CollisionSim::CollisionCalculator
 

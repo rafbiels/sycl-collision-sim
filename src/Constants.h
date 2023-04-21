@@ -25,7 +25,7 @@ constexpr static Util::Timer::duration_t ComputeInterval{std::chrono::microsecon
 constexpr static Util::Timer::duration_t TextUpdateInterval{std::chrono::milliseconds{200}};
 
 /// Number of measurements to keep for averaging the FPS measurement
-constexpr static size_t FrameTimeCounterWindow{200};
+constexpr static size_t FrameTimeCounterWindow{2048};
 
 /// Slow down or speed up the simulation with respect to real time
 constexpr static float RealTimeScale{0.5f};

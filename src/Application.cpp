@@ -41,8 +41,10 @@ m_syclQueue{std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::
     setSwapInterval(0);
 
     createActors();
+    m_state = std::make_unique<State>(m_world.boundaries(), m_actors, m_numAllVertices);
+
     // Kernel warm-up
-    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_world.boundaries(), m_numAllVertices);
+    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
 
     m_textRenderer.newText("cfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -133,9 +135,17 @@ void CollisionSim::Application::compute() {
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
 
     // Process world collision
+    // std::cout << std::flush;
     // Corrade::Utility::Debug{} << "--------------------";
-    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_world.boundaries(), m_numAllVertices);
+    // size_t iActor{0};
+    // for (Actor& actor : m_actors) {
+    //     Corrade::Utility::Debug{} << "actor " << iActor++ << " pos =" << actor.transformation().translation() << " v =" << actor.linearVelocity();
+    // }
+    // std::cout << std::flush;
+    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+    // std::cout << std::flush;
     // CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
+    // std::cout << std::flush;
 
     // Add global forces like gravity
     for (Actor& actor : m_actors) {
@@ -165,7 +175,7 @@ void CollisionSim::Application::createActors() {
     const float zmax{m_world.boundaries().max().z()};
     const float xrange{xmax-xmin};
     const float zrange{zmax-zmin};
-    const size_t gridSideN{3};
+    const size_t gridSideN{5};
     const float dx{xrange/(gridSideN)};
     const float dz{zrange/(gridSideN)};
     auto generator = [](size_t index){

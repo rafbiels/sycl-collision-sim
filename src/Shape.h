@@ -26,6 +26,7 @@ class Shape {
         const Magnum::Trade::MeshData& meshData() const;
 
         Magnum::Matrix4& transformation();
+        const Magnum::Matrix4& transformation_const() const;
         void transformation(const Magnum::Matrix4& trf);
 
         Magnum::Color3& colour();
@@ -52,9 +53,9 @@ class Shape {
         Magnum::Matrix4 m_transformation;
         Magnum::Color3 m_colour{0.5f,0.5f,0.5f};
         /// SoA vertex data in body coordinate system
-        std::array<std::vector<float>,3> m_vertexPositions;
+        std::array<std::vector<float>,3> m_vertexPositions{};
         /// SoA vertex data in world coordinate system
-        std::array<std::vector<float>,3> m_vertexPositionsWorld;
+        std::array<std::vector<float>,3> m_vertexPositionsWorld{};
         /// Constant number of vertices, calculated at construction
         size_t m_numVertices{0};
 };

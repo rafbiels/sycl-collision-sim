@@ -40,6 +40,11 @@ Magnum::Matrix4& CollisionSim::Shape::transformation() {
 }
 
 // -----------------------------------------------------------------------------
+const Magnum::Matrix4& CollisionSim::Shape::transformation_const() const {
+    return m_transformation;
+}
+
+// -----------------------------------------------------------------------------
 void CollisionSim::Shape::transformation(const Magnum::Matrix4& trf) {
     m_transformation = trf;
 }

@@ -31,7 +31,9 @@ class Actor : public Shape {
         float mass() const {return m_mass;}
         const Magnum::Vector3& linearVelocity() const {return m_linearVelocity;}
         const Magnum::Vector3& angularVelocity() const {return m_angularVelocity;}
+
         const Magnum::Matrix3& inertiaInv() const {return m_inertiaInv;}
+        void inertiaInv(const Magnum::Matrix3& inertiaInv) {m_inertiaInv = inertiaInv;}
 
         /// Apply a force to the centre of mass
         void addForce(const Magnum::Vector3& force);
