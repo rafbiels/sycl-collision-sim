@@ -81,12 +81,19 @@ class State {
         ///{@
         size_t numActors() const {return m_numActors;}
         size_t numAllVertices() const {return m_numAllVertices;}
-        const std::vector<float>& mass() const {return m_mass;}
         const std::vector<uint16_t>& actorIndices() const {return m_actorIndices;}
+        const std::vector<float>& mass() const {return m_mass;}
+        const std::vector<float3x3>& bodyInertiaInv() const {return m_bodyInertiaInv;}
         const std::array<std::vector<float>,3>& allVertices() const {return m_allVertices;}
         const std::vector<sycl::float3>& translation() const {return m_translation;}
+        const std::vector<float3x3>& rotation() const {return m_rotation;}
         const std::vector<float3x3>& inertiaInv() const {return m_inertiaInv;}
         const std::vector<sycl::float3>& linearVelocity() const {return m_linearVelocity;}
+        const std::vector<sycl::float3>& angularVelocity() const {return m_angularVelocity;}
+        const std::vector<sycl::float3>& linearMomentum() const {return m_linearMomentum;}
+        const std::vector<sycl::float3>& angularMomentum() const {return m_angularMomentum;}
+        const std::vector<sycl::float3>& force() const {return m_force;}
+        const std::vector<sycl::float3>& torque() const {return m_torque;}
         ///@}
 
         WallCollisionCache& wallCollisionCache() {return m_wallCollisionCache;}
@@ -95,39 +102,60 @@ class State {
         ///{@
         sycl::buffer<uint16_t,1>& actorIndicesBuf() {return m_actorIndicesBuf;}
         sycl::buffer<float,1>& massBuf() {return m_massBuf;}
+        sycl::buffer<float3x3,1>& bodyInertiaInvBuf() {return m_bodyInertiaInvBuf;}
         sycl::buffer<float,1>& vxBuf() {return m_vxBuf;}
         sycl::buffer<float,1>& vyBuf() {return m_vyBuf;}
         sycl::buffer<float,1>& vzBuf() {return m_vzBuf;}
         sycl::buffer<sycl::float3,1>& translationBuf() {return m_translationBuf;}
+        sycl::buffer<float3x3,1>& rotationBuf() {return m_rotationBuf;}
         sycl::buffer<float3x3,1>& inertiaInvBuf() {return m_inertiaInvBuf;}
         sycl::buffer<sycl::float3,1>& linearVelocityBuf() {return m_linearVelocityBuf;}
+        sycl::buffer<sycl::float3,1>& angularVelocityBuf() {return m_angularVelocityBuf;}
+        sycl::buffer<sycl::float3,1>& linearMomentumBuf() {return m_linearMomentumBuf;}
+        sycl::buffer<sycl::float3,1>& angularMomentumBuf() {return m_angularMomentumBuf;}
+        sycl::buffer<sycl::float3,1>& forceBuf() {return m_forceBuf;}
+        sycl::buffer<sycl::float3,1>& torqueBuf() {return m_torqueBuf;}
         ///@}
     private:
         /// Constants
         ///@{
         size_t m_numActors{0};
         size_t m_numAllVertices{0};
-        std::vector<float> m_mass;
         std::vector<uint16_t> m_actorIndices; // Caution: restricting numActors to 65536
+        std::vector<float> m_mass;
+        std::vector<float3x3> m_bodyInertiaInv;
         ///@}
         /// Mutable data
         /// @{
         std::array<std::vector<float>,3> m_allVertices;
         std::vector<sycl::float3> m_translation;
+        std::vector<float3x3> m_rotation;
         std::vector<float3x3> m_inertiaInv;
         std::vector<sycl::float3> m_linearVelocity;
+        std::vector<sycl::float3> m_angularVelocity;
+        std::vector<sycl::float3> m_linearMomentum;
+        std::vector<sycl::float3> m_angularMomentum;
+        std::vector<sycl::float3> m_force;
+        std::vector<sycl::float3> m_torque;
         WallCollisionCache m_wallCollisionCache;
         ///@}
         /// SYCL buffers
         ///@{
         sycl::buffer<uint16_t,1> m_actorIndicesBuf;
         sycl::buffer<float,1> m_massBuf;
+        sycl::buffer<float3x3,1> m_bodyInertiaInvBuf;
         sycl::buffer<float,1> m_vxBuf;
         sycl::buffer<float,1> m_vyBuf;
         sycl::buffer<float,1> m_vzBuf;
         sycl::buffer<sycl::float3,1> m_translationBuf;
+        sycl::buffer<float3x3,1> m_rotationBuf;
         sycl::buffer<float3x3,1> m_inertiaInvBuf;
         sycl::buffer<sycl::float3,1> m_linearVelocityBuf;
+        sycl::buffer<sycl::float3,1> m_angularVelocityBuf;
+        sycl::buffer<sycl::float3,1> m_linearMomentumBuf;
+        sycl::buffer<sycl::float3,1> m_angularMomentumBuf;
+        sycl::buffer<sycl::float3,1> m_forceBuf;
+        sycl::buffer<sycl::float3,1> m_torqueBuf;
         ///}
 };
 } // namespace CollisionSim

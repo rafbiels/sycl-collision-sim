@@ -13,17 +13,13 @@
 #include <numeric>
 
 class world_collision;
+class motion_simulation;
 
 namespace CollisionSim::Simulation {
 
 // -----------------------------------------------------------------------------
 void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
     for (auto& actor : actors) {
-        // Fix floating point loss of orthogonality in the rotation matrix
-        // and store the rotation matrix on the stack
-        Util::orthonormaliseRotation(actor.transformation());
-        Magnum::Matrix3 rotation{actor.transformation().rotation()};
-
         // ===========================================
         // Rigid body physics simulation based on D. Baraff 2001
         // https://graphics.pixar.com/pbm2001/pdf/notesg.pdf
@@ -33,6 +29,7 @@ void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
         actor.angularMomentum(actor.angularMomentum() + actor.torque() * dtime);
 
         // Compute linear and angular velocity
+        Magnum::Matrix3 rotation{actor.transformation().rotation()};
         actor.linearVelocity(actor.linearMomentum() / actor.mass());
         actor.inertiaInv(rotation * actor.bodyInertiaInv() * rotation.transposed());
         actor.angularVelocity( actor.inertiaInv() * actor.angularMomentum());
@@ -66,7 +63,59 @@ void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
 
 // -----------------------------------------------------------------------------
 void simulateMotionParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actors, State* state) {
+    try {
+        queue->submit([&](sycl::handler& cgh){
+            sycl::accessor massAcc{state->massBuf(), cgh, sycl::read_only};
+            sycl::accessor bodyInertiaInvAcc{state->bodyInertiaInvBuf(), cgh, sycl::read_only};
+            sycl::accessor translationAcc{state->translationBuf(), cgh, sycl::read_write};
+            sycl::accessor rotationAcc{state->rotationBuf(), cgh, sycl::read_write};
+            sycl::accessor inertiaInvAcc{state->inertiaInvBuf(), cgh, sycl::write_only, sycl::no_init};
+            sycl::accessor linearVelocityAcc{state->linearVelocityBuf(), cgh, sycl::write_only, sycl::no_init};
+            sycl::accessor angularVelocityAcc{state->angularVelocityBuf(), cgh, sycl::write_only, sycl::no_init};
+            sycl::accessor linearMomentumAcc{state->linearMomentumBuf(), cgh, sycl::read_write};
+            sycl::accessor angularMomentumAcc{state->angularMomentumBuf(), cgh, sycl::read_write};
+            sycl::accessor forceAcc{state->forceBuf(), cgh, sycl::read_only};
+            sycl::accessor torqueAcc{state->torqueBuf(), cgh, sycl::read_only};
+            cgh.parallel_for<motion_simulation>(state->numActors(), [=](sycl::id<1> id){
+                // Compute linear and angular momentum
+                linearMomentumAcc[id] += forceAcc[id] * dtime;
+                angularMomentumAcc[id] += torqueAcc[id] * dtime;
 
+                // Compute linear and angular velocity
+                linearVelocityAcc[id] = linearMomentumAcc[id] / massAcc[id];
+                inertiaInvAcc[id] = Util::mmul(
+                    Util::mmul(rotationAcc[id], bodyInertiaInvAcc[id]),
+                    Util::transpose(rotationAcc[id])); // R * Ib^-1 * R^T
+                angularVelocityAcc[id] = Util::mvmul(inertiaInvAcc[id], angularMomentumAcc[id]);
+
+                // Apply translation
+                translationAcc[id] += linearVelocityAcc[id] * dtime;
+
+                // Apply rotation
+                auto star = [](const sycl::float3& v) constexpr {
+                    return std::array<sycl::float3,3>{
+                        sycl::float3{ 0.0f,  v[2], -v[1]},
+                        sycl::float3{-v[2],  0.0f,  v[0]},
+                        sycl::float3{ v[1], -v[0],  0.0f}
+                    };
+                };
+                std::array<sycl::float3,3> drot = Util::msmul(
+                    Util::mmul(star(linearVelocityAcc[id]), rotationAcc[id]),
+                    dtime);
+                rotationAcc[id][0] += drot[0];
+                rotationAcc[id][1] += drot[1];
+                rotationAcc[id][2] += drot[2];
+            });
+        }).wait_and_throw();
+    } catch (const std::exception& ex) {
+        Corrade::Utility::Error{} << "Exception caught: " << ex.what();
+    }
+
+    // Reset force and torque
+    for (auto& actor : actors) {
+        actor.force({0, 0, 0});
+        actor.torque({0, 0, 0});
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -152,8 +201,6 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
 
 // -----------------------------------------------------------------------------
 void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State* state) {
-    state->load(actors);
-    state->resetBuffers(); // FIXME: is there a way to avoid doing this?
     try {
         queue->submit([&](sycl::handler& cgh){
             sycl::accessor boundariesAcc{state->wallCollisionCache().boundariesBuf(), cgh, sycl::read_only};

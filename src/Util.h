@@ -116,11 +116,50 @@ constexpr Magnum::Vector3 toMagnum(const sycl::float3& vec) {
 }
 ///@}
 
+/// SYCL matrix-scalar multiplication
+constexpr std::array<sycl::float3,3> msmul(const std::array<sycl::float3,3>& mat, float scalar) {
+    return {
+        sycl::float3{mat[0][0], mat[0][1], mat[0][2]}*scalar,
+        sycl::float3{mat[1][0], mat[1][1], mat[1][2]}*scalar,
+        sycl::float3{mat[2][0], mat[2][1], mat[2][2]}*scalar
+    };
+}
+
 /// SYCL matrix-vector multiplication
 constexpr sycl::float3 mvmul(const std::array<sycl::float3,3>& mat, const sycl::float3& vec) {
     return {mat[0][0]*vec[0] + mat[1][0]*vec[1] + mat[2][0]*vec[2],
             mat[0][1]*vec[0] + mat[1][1]*vec[1] + mat[2][1]*vec[2],
             mat[0][2]*vec[0] + mat[1][2]*vec[1] + mat[2][2]*vec[2]};
+}
+
+/// SYCL matrix multiplication
+constexpr std::array<sycl::float3,3> mmul(const std::array<sycl::float3,3>& a, const std::array<sycl::float3,3>& b) {
+    return {
+        sycl::float3{
+            a[0][0]*b[0][0] + a[1][0]*b[0][1] + a[2][0]*b[0][2],
+            a[0][1]*b[0][0] + a[1][1]*b[0][1] + a[2][1]*b[0][2],
+            a[0][2]*b[0][0] + a[1][2]*b[0][1] + a[2][2]*b[0][2]
+        },
+        sycl::float3{
+            a[0][0]*b[1][0] + a[1][0]*b[1][1] + a[2][0]*b[1][2],
+            a[0][1]*b[1][0] + a[1][1]*b[1][1] + a[2][1]*b[1][2],
+            a[0][2]*b[1][0] + a[1][2]*b[1][1] + a[2][2]*b[1][2]
+        },
+        sycl::float3{
+            a[0][0]*b[2][0] + a[1][0]*b[2][1] + a[2][0]*b[2][2],
+            a[0][1]*b[2][0] + a[1][1]*b[2][1] + a[2][1]*b[2][2],
+            a[0][2]*b[2][0] + a[1][2]*b[2][1] + a[2][2]*b[2][2]
+        }
+    };
+}
+
+/// SYCL matrix transpose
+constexpr std::array<sycl::float3,3> transpose(const std::array<sycl::float3,3>& mat) {
+    return {
+        sycl::float3{mat[0][0], mat[1][0], mat[2][0]},
+        sycl::float3{mat[0][1], mat[1][1], mat[2][1]},
+        sycl::float3{mat[0][2], mat[1][2], mat[2][2]}
+    };
 }
 
 } // namespace CollisionSim::Util

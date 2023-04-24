@@ -144,9 +144,16 @@ void CollisionSim::Application::compute() {
     }
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
 
+    for (Actor& actor : m_actors) {
+        // Fix floating point loss of orthogonality in the rotation matrix
+        Util::orthonormaliseRotation(actor.transformation());
+    }
+
     if (m_cpuOnly) {
         Simulation::collideWorldSequential(m_actors, m_world.boundaries());
     } else {
+        m_state->load(m_actors);
+        m_state->resetBuffers(); // FIXME: is there a way to avoid doing this?
         Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
     }
 
@@ -165,8 +172,8 @@ void CollisionSim::Application::compute() {
         Simulation::simulateMotionSequential(simDeltaTime, m_actors);
     } else {
         // TODO: implement parallel computation
-        Simulation::simulateMotionSequential(simDeltaTime, m_actors);
         // Simulation::simulateMotionParallel(simDeltaTime, m_syclQueue.get(), m_actors, m_state.get());
+        Simulation::simulateMotionSequential(simDeltaTime, m_actors);
     }
 }
 
