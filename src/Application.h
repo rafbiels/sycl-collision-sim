@@ -53,6 +53,8 @@ class Application final : public Magnum::Platform::Application {
 
         std::unique_ptr<State> m_state;
         std::unique_ptr<sycl::queue> m_syclQueue;
+
+        bool m_cpuOnly{false};
 };
 } // namespace CollisionSim
 

@@ -23,7 +23,10 @@
 
 // -----------------------------------------------------------------------------
 CollisionSim::Application::Application(const Arguments& arguments)
-: Magnum::Platform::Application{arguments, Configuration{}.setTitle(Constants::ApplicationName)},
+: Magnum::Platform::Application{
+    arguments,
+    Configuration{}.setTitle(Constants::ApplicationName),
+    GLConfiguration{}.setFlags(GLConfiguration::Flag::QuietLog)},
 m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
@@ -38,7 +41,17 @@ m_syclQueue{std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::
     Magnum::GL::Renderer::setBlendEquation(Magnum::GL::Renderer::BlendEquation::Add, Magnum::GL::Renderer::BlendEquation::Add);
 
     setMinimalLoopPeriod(0);
-    setSwapInterval(0);
+    if (swapInterval()!=0) {setSwapInterval(0);}
+
+    for (int iArg{0}; iArg<arguments.argc; ++iArg) {
+        if (std::string{arguments.argv[iArg]}=="--cpu") {
+            m_cpuOnly = true;
+            Corrade::Utility::Debug{} << "Running CPU implementation without SYCL because of the --cpu option";
+        }
+    }
+    if (!m_cpuOnly) {
+        Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
+    }
 
     createActors();
     m_state = std::make_unique<State>(m_world.boundaries(), m_actors, m_numAllVertices);
@@ -142,9 +155,12 @@ void CollisionSim::Application::compute() {
     //     Corrade::Utility::Debug{} << "actor " << iActor++ << " pos =" << actor.transformation().translation() << " v =" << actor.linearVelocity();
     // }
     // std::cout << std::flush;
-    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+    if (m_cpuOnly) {
+        CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
+    } else {
+        CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+    }
     // std::cout << std::flush;
-    // CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
     // std::cout << std::flush;
 
     // Add global forces like gravity
