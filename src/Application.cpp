@@ -5,7 +5,7 @@
  */
 
 #include "Application.h"
-#include "CollisionCalculator.h"
+#include "Simulation.h"
 #include "Constants.h"
 
 #include <Magnum/Magnum.h>
@@ -53,7 +53,7 @@ m_syclQueue{nullptr}
         m_syclQueue = std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{});
         Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
         // Kernel warm-up
-        CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+        Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
     }
 
     m_textRenderer.newText("cfps",
@@ -145,9 +145,9 @@ void CollisionSim::Application::compute() {
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
 
     if (m_cpuOnly) {
-        CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
+        Simulation::collideWorldSequential(m_actors, m_world.boundaries());
     } else {
-        CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+        Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
     }
 
     // Add global forces like gravity
@@ -158,7 +158,15 @@ void CollisionSim::Application::compute() {
         if (wallTimeSec < 0.1) {
             actor.addForce({100.0f*actor.mass(), 0.0f, 0.0f}, {0.0f,0.0f,0.0f});
         }
-        actor.computeState(Constants::RealTimeScale * frameTimeSec);
+    }
+
+    float simDeltaTime{Constants::RealTimeScale * frameTimeSec};
+    if (m_cpuOnly) {
+        Simulation::simulateMotionSequential(simDeltaTime, m_actors);
+    } else {
+        // TODO: implement parallel computation
+        Simulation::simulateMotionSequential(simDeltaTime, m_actors);
+        // Simulation::simulateMotionParallel(simDeltaTime, m_syclQueue.get(), m_actors, m_state.get());
     }
 }
 

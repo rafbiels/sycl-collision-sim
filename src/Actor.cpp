@@ -78,8 +78,8 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
         Util::outerProduct(dx, dx)
     );
 
-    m_bodyInertia = Magnum::Matrix3{Magnum::Math::IdentityInit, m_covariance.trace()} - m_covariance;
-    m_bodyInertiaInv = m_bodyInertia.inverted();
+    Magnum::Matrix3 bodyInertia = Magnum::Matrix3{Magnum::Math::IdentityInit, m_covariance.trace()} - m_covariance;
+    m_bodyInertiaInv = bodyInertia.inverted();
 }
 
 // -----------------------------------------------------------------------------
@@ -99,52 +99,6 @@ void CollisionSim::Actor::addVelocity(const Magnum::Vector3& linear, const Magnu
     m_angularVelocity += angular;
     m_linearMomentum = m_mass * m_linearVelocity;
     m_angularMomentum = m_inertiaInv.inverted() * m_angularVelocity;
-}
-
-// -----------------------------------------------------------------------------
-void CollisionSim::Actor::computeState(float dtime) {
-    // Fix floating point loss of orthogonality in the rotation matrix
-    // and store the rotation matrix on the stack
-    Util::orthonormaliseRotation(transformation());
-    Magnum::Matrix3 rotation{transformation().rotation()};
-
-    // ===========================================
-    // Rigid body physics simulation based on D. Baraff 2001
-    // https://graphics.pixar.com/pbm2001/pdf/notesg.pdf
-    // ===========================================
-    // Compute linear and angular momentum
-    m_linearMomentum += m_force * dtime;
-    m_angularMomentum += m_torque * dtime;
-
-    // Compute linear and angular velocity
-    m_linearVelocity = m_linearMomentum / m_mass;
-    m_inertiaInv =  rotation * m_bodyInertiaInv * rotation.transposed();
-    m_angularVelocity = m_inertiaInv * m_angularMomentum;
-
-    // Apply translation and rotation
-    auto star = [](const Magnum::Vector3& v) {
-        return Magnum::Matrix3{
-            { 0.0f,  v[2], -v[1]},
-            {-v[2],  0.0f,  v[0]},
-            { v[1], -v[0],  0.0f}
-        };
-    };
-    Magnum::Matrix3 drot = star(m_angularVelocity) * rotation * dtime;
-    Magnum::Vector3 dx = m_linearVelocity * dtime;
-
-    Magnum::Matrix4 trf{
-        {drot[0][0], drot[0][1], drot[0][2], 0.0f},
-        {drot[1][0], drot[1][1], drot[1][2], 0.0f},
-        {drot[2][0], drot[2][1], drot[2][2], 0.0f},
-        {dx[0], dx[1], dx[2], 0.0f},
-    };
-
-    transformation(transformation() + trf);
-    updateVertexPositions();
-
-    // Reset force and torque
-    m_force = {0, 0, 0};
-    m_torque = {0, 0, 0};
 }
 
 // -----------------------------------------------------------------------------

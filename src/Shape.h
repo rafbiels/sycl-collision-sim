@@ -43,7 +43,6 @@ class Shape {
         /// Return the bounding box in world coordinate system
         Magnum::Range3D axisAlignedBoundingBox();
 
-    protected:
         /// Recalculate m_vertexPositionsWorld
         void updateVertexPositions();
 

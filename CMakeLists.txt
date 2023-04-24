@@ -16,8 +16,8 @@ corrade_add_resource(CollisionSim_RESOURCES assets/resources.conf)
 
 add_executable(collision-sim src/Application.cpp
     src/Actor.cpp
-    src/CollisionCalculator.cpp
     src/Shape.cpp
+    src/Simulation.cpp
     src/State.cpp
     src/TextRenderer.cpp
     src/Util.cpp

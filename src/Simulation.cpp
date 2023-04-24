@@ -4,7 +4,7 @@
  * For a copy, see https://opensource.org/licenses/MIT.
  */
 
-#include "CollisionCalculator.h"
+#include "Simulation.h"
 #include "Constants.h"
 #include "Util.h"
 #include "Wall.h"
@@ -14,12 +14,64 @@
 
 class world_collision;
 
-namespace CollisionSim::CollisionCalculator {
+namespace CollisionSim::Simulation {
 
-void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries) {
-    int iActor{-1};
+// -----------------------------------------------------------------------------
+void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
     for (auto& actor : actors) {
-        ++iActor;
+        // Fix floating point loss of orthogonality in the rotation matrix
+        // and store the rotation matrix on the stack
+        Util::orthonormaliseRotation(actor.transformation());
+        Magnum::Matrix3 rotation{actor.transformation().rotation()};
+
+        // ===========================================
+        // Rigid body physics simulation based on D. Baraff 2001
+        // https://graphics.pixar.com/pbm2001/pdf/notesg.pdf
+        // ===========================================
+        // Compute linear and angular momentum
+        actor.linearMomentum(actor.linearMomentum() + actor.force() * dtime);
+        actor.angularMomentum(actor.angularMomentum() + actor.torque() * dtime);
+
+        // Compute linear and angular velocity
+        actor.linearVelocity(actor.linearMomentum() / actor.mass());
+        actor.inertiaInv(rotation * actor.bodyInertiaInv() * rotation.transposed());
+        actor.angularVelocity( actor.inertiaInv() * actor.angularMomentum());
+
+        // Apply translation and rotation
+        auto star = [](const Magnum::Vector3& v) {
+            return Magnum::Matrix3{
+                { 0.0f,  v[2], -v[1]},
+                {-v[2],  0.0f,  v[0]},
+                { v[1], -v[0],  0.0f}
+            };
+        };
+        Magnum::Matrix3 drot = star(actor.angularVelocity()) * rotation * dtime;
+        Magnum::Vector3 dx = actor.linearVelocity() * dtime;
+
+        Magnum::Matrix4 trf{
+            {drot[0][0], drot[0][1], drot[0][2], 0.0f},
+            {drot[1][0], drot[1][1], drot[1][2], 0.0f},
+            {drot[2][0], drot[2][1], drot[2][2], 0.0f},
+            {dx[0], dx[1], dx[2], 0.0f},
+        };
+
+        actor.transformation(actor.transformation() + trf);
+        actor.updateVertexPositions();
+
+        // Reset force and torque
+        actor.force({0, 0, 0});
+        actor.torque({0, 0, 0});
+    }
+}
+
+// -----------------------------------------------------------------------------
+void simulateMotionParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actors, State* state) {
+
+}
+
+// -----------------------------------------------------------------------------
+void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries) {
+    for (auto& actor : actors) {
         Wall collision{Wall::None};
         size_t collidingVertexIndex{std::numeric_limits<size_t>::max()};
 
@@ -98,6 +150,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
     }
 }
 
+// -----------------------------------------------------------------------------
 void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State* state) {
     state->load(actors);
     state->resetBuffers(); // FIXME: is there a way to avoid doing this?
@@ -184,4 +237,4 @@ void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State*
 
 }
 
-} // namespace CollisionSim::CollisionCalculator
+} // namespace CollisionSim::Simulation
