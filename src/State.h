@@ -9,9 +9,9 @@
 
 #include "Actor.h"
 #include "Wall.h"
-#include <sycl/sycl.hpp>
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Range.h>
+#include <sycl/sycl.hpp>
 #include <vector>
 #include <array>
 

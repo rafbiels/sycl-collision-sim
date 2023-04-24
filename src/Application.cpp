@@ -5,19 +5,15 @@
  */
 
 #include "Application.h"
-#include "Actor.h"
 #include "CollisionCalculator.h"
 #include "Constants.h"
-#include "Shape.h"
-#include "Util.h"
-#include "World.h"
 
 #include <Magnum/Magnum.h>
-#include <Magnum/GL/Context.h>
 #include <Magnum/GL/DefaultFramebuffer.h>
 #include <Magnum/GL/Renderer.h>
 #include <Magnum/Math/Color.h>
 
+#include <Corrade/Utility/Debug.h>
 #include <Corrade/Utility/FormatStl.h>
 #include <Corrade/Containers/StringStlView.h>
 
@@ -32,7 +28,7 @@ m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDime
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeTask{[this]{compute();}},
-m_syclQueue{std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{})}
+m_syclQueue{nullptr}
 {
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::FaceCulling);
@@ -49,15 +45,16 @@ m_syclQueue{std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::
             Corrade::Utility::Debug{} << "Running CPU implementation without SYCL because of the --cpu option";
         }
     }
-    if (!m_cpuOnly) {
-        Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
-    }
 
     createActors();
     m_state = std::make_unique<State>(m_world.boundaries(), m_actors, m_numAllVertices);
 
-    // Kernel warm-up
-    CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+    if (!m_cpuOnly) {
+        m_syclQueue = std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{});
+        Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
+        // Kernel warm-up
+        CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+    }
 
     m_textRenderer.newText("cfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
@@ -147,21 +144,11 @@ void CollisionSim::Application::compute() {
     }
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
 
-    // Process world collision
-    // std::cout << std::flush;
-    // Corrade::Utility::Debug{} << "--------------------";
-    // size_t iActor{0};
-    // for (Actor& actor : m_actors) {
-    //     Corrade::Utility::Debug{} << "actor " << iActor++ << " pos =" << actor.transformation().translation() << " v =" << actor.linearVelocity();
-    // }
-    // std::cout << std::flush;
     if (m_cpuOnly) {
         CollisionCalculator::collideWorldSequential(m_actors, m_world.boundaries());
     } else {
         CollisionCalculator::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
     }
-    // std::cout << std::flush;
-    // std::cout << std::flush;
 
     // Add global forces like gravity
     for (Actor& actor : m_actors) {

@@ -8,7 +8,6 @@
 #include "Constants.h"
 #include "Util.h"
 #include "Wall.h"
-#include <Corrade/Utility/Debug.h>
 #include <sycl/sycl.hpp>
 #include <limits>
 #include <numeric>
@@ -68,17 +67,16 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
             }
         }
         if (collision==Wall::None) {continue;}
-        // Corrade::Utility::Debug{} << "Wall with world detected, normal = " << normal;
         if (Magnum::Math::dot(actor.linearVelocity(), normal) > 0.0f) {
-            // Corrade::Utility::Debug{} << "Velocity " << actor.linearVelocity() << " points away from the wall, skipping this collision";
             continue;
         }
+
         const Magnum::Vector3 collidingVertexWorld{
             actor.vertexPositionsWorld()[0][collidingVertexIndex],
             actor.vertexPositionsWorld()[1][collidingVertexIndex],
             actor.vertexPositionsWorld()[2][collidingVertexIndex]
         };
-        // Corrade::Utility::Debug{} << "Before: v = " << actor.linearVelocity();
+
         const Magnum::Vector3 radius = collidingVertexWorld - actor.transformation().translation();
         const auto a = Magnum::Math::cross(radius, normal);
         const auto b = actor.inertiaInv() * a;
@@ -88,42 +86,15 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
                               Magnum::Math::dot(actor.linearVelocity(), normal) /
                               (1.0f/actor.mass() + d);
 
-        // Corrade::Utility::Debug{} << "impulse = " << impulse;
         Magnum::Vector3 addLinearV = (impulse / actor.mass()) * normal;
         Magnum::Vector3 addAngularV = impulse * b;
-
-        // Corrade::Utility::Debug{} << "cpu collision = " << static_cast<WallUnderlyingType>(collision)
-        //                           << " actor " << iActor << "\n"
-        //                           << "normal = " << normal << "\n"
-        //                           << "vertex = " << collidingVertexWorld << "\n"
-        //                           << "radius = " << radius << "\n"
-        //                           << "a = " << a << "\n"
-        //                           << "b = " << b << "\n"
-        //                           << "c = " << c << "\n"
-        //                           << "d = " << d << "\n"
-        //                           << "impulse = " << impulse << "\n"
-        //                           << "linearVelocityAcc[iActor] = " << actor.linearVelocity() << "\n"
-        //                           << "addLinearVelocityAcc[id] = " << addLinearV << "\n"
-        //                           << "addAngularVelocityAcc[id] = " << addAngularV << "\n";
-
-        // Corrade::Utility::Debug{} << "[CPU] actor " << iActor
-        //                           << " collision type " << static_cast<uint8_t>(collision)
-        //                           << ", results = ("
-        //                           << addLinearV[0] << ","
-        //                           << addLinearV[1] << ","
-        //                           << addLinearV[2] << "), ("
-        //                           << addAngularV[0] << ","
-        //                           << addAngularV[1] << ","
-        //                           << addAngularV[2] << ")";
 
         actor.addVelocity(addLinearV, addAngularV);
         const float vy{actor.linearVelocity().y()};
         // TODO: implement better resting condition
         if (normal.y() > 0 && vy > 0 && vy < 0.1) {
-            // Corrade::Utility::Debug{} << "Resting on the floor, resetting vy to 0";
             actor.addVelocity({0.0f, -1.0f*vy, 0.0f}, {0.0f, 0.0f, 0.0f});
         }
-        // Corrade::Utility::Debug{} << "After: v = " << actor.linearVelocity();
     }
 }
 
@@ -145,7 +116,6 @@ void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State*
             sycl::accessor collisionsAcc{state->wallCollisionCache().collisionsBuf(), cgh, sycl::write_only, sycl::no_init};
             sycl::accessor addLinearVelocityAcc{state->wallCollisionCache().addLinearVelocityBuf(), cgh, sycl::write_only, sycl::no_init};
             sycl::accessor addAngularVelocityAcc{state->wallCollisionCache().addAngularVelocityBuf(), cgh, sycl::write_only, sycl::no_init};
-            // auto os = sycl::stream{65536, 1024, cgh};
 
             cgh.parallel_for<world_collision>(state->numAllVertices(), [=](sycl::id<1> id){
                 Wall collision{Wall::None};
@@ -169,23 +139,6 @@ void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State*
                 addLinearVelocityAcc[id] = (impulse / massAcc[iActor]) * normal;
                 addAngularVelocityAcc[id] = impulse * b;
                 bool ignoreAwayFromWall{sycl::dot(linearVelocityAcc[iActor], normal) > 0.0f};
-                // // branchless version of: if (ignoreAwayFromWall) {collisionsAcc[id]=Collision::None;}
-                // collisionsAcc[id] = collision;
-                // if (collision != Wall::None && !ignoreAwayFromWall) {
-                //     os << "gpu collision = " << static_cast<WallUnderlyingType>(collision)
-                //        << " actor " << iActor << "\n"
-                //        << "normal = " << normal << "\n"
-                //        << "vertex = " << sycl::float3{vxAcc[id], vyAcc[id], vzAcc[id]} << "\n"
-                //        << "radius = " << radius << "\n"
-                //        << "a = " << a << "\n"
-                //        << "b = " << b << "\n"
-                //        << "c = " << c << "\n"
-                //        << "d = " << d << "\n"
-                //        << "impulse = " << impulse << "\n"
-                //        << "linearVelocityAcc[iActor] = " << linearVelocityAcc[iActor] << "\n"
-                //        << "addLinearVelocityAcc[id] = " << addLinearVelocityAcc[id] << "\n"
-                //        << "addAngularVelocityAcc[id] = " << addAngularVelocityAcc[id] << "\n";
-                // }
                 collisionsAcc[id] = static_cast<Wall>(static_cast<WallUnderlyingType>(collision) * !ignoreAwayFromWall);
             });
         }).wait_and_throw();
@@ -214,22 +167,10 @@ void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State*
         };
         sycl::float3 meanAddLinV = std::accumulate(data.addLinearV.begin(),data.addLinearV.end(),sycl::float3{0.0f},accumulateMean);
         sycl::float3 meanAddAngV = std::accumulate(data.addAngularV.begin(),data.addAngularV.end(),sycl::float3{0.0f},accumulateMean);
-        
-        // Corrade::Utility::Debug{} << "[GPU] actor " << iActor
-        //                           << " collision type " << static_cast<uint8_t>(data.type)
-        //                           << ", results = ("
-        //                           << meanAddLinV[0] << ","
-        //                           << meanAddLinV[1] << ","
-        //                           << meanAddLinV[2] << "), ("
-        //                           << meanAddAngV[0] << ","
-        //                           << meanAddAngV[1] << ","
-        //                           << meanAddAngV[2] << ")"
-        //                           << "\nlinearVelocity: " << actors[iActor].linearVelocity()
-        //                           << "\ndot(v, dv): " << Magnum::Math::dot(actors[iActor].linearVelocity(),Util::toMagnum(meanAddLinV));
+
         Magnum::Vector3 addLinV = Util::toMagnum(meanAddLinV);
         // FIXME: why does this happen? fix the logic to avoid this situation
         if (Magnum::Math::dot(actors[iActor].linearVelocity(),addLinV) > 0.0f) {
-            // Corrade::Utility::Debug{} << "Collision result adds velocity towards movement direction, skipping";
             continue;
         }
         actors[iActor].addVelocity(addLinV, Util::toMagnum(meanAddAngV));
@@ -237,7 +178,6 @@ void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State*
         const float vy{actors[iActor].linearVelocity().y()};
         // TODO: implement better resting condition
         if ((data.type & Wall::Ymin) > 0 && vy > 0 && vy < 0.1) {
-            // Corrade::Utility::Debug{} << "Resting on the floor, resetting vy to 0";
             actors[iActor].addVelocity({0.0f, 0.0001f-1.0f*vy, 0.0f}, {0.0f, 0.0f, 0.0f});
         }
     }

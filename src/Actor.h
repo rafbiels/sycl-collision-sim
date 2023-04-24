@@ -9,18 +9,10 @@
 
 #include "Shape.h"
 #include <Magnum/Magnum.h>
-#include <Magnum/GL/Mesh.h>
-#include <Magnum/Math/Matrix4.h>
+#include <Magnum/Math/Matrix3.h>
 #include <Magnum/Math/Vector3.h>
-#include <Magnum/Math/Range.h>
-#include <Magnum/Math/Color.h>
-
-#include <Magnum/MeshTools/Compile.h>
-#include <Magnum/MeshTools/Transform.h>
-#include <Magnum/Primitives/Cube.h>
-#include <Magnum/Primitives/Icosphere.h>
-#include <Magnum/Primitives/Cylinder.h>
 #include <Magnum/Primitives/Cone.h>
+#include <Magnum/Primitives/Cylinder.h>
 #include <Magnum/Trade/MeshData.h>
 
 namespace CollisionSim {

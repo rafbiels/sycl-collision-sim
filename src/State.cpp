@@ -85,10 +85,7 @@ void CollisionSim::State::load(const std::vector<Actor>& actors) {
 
 // -----------------------------------------------------------------------------
 void CollisionSim::State::resetBuffers() {
-    /* Actor indices and mass don't change, no need to reset
-    m_actorIndicesBuf = {m_actorIndices.data(), m_numAllVertices};
-    m_massBuf = {m_mass.data(), m_numActors};
-    */
+    // NB: Actor indices and mass don't change, so we don't reset their buffers
     m_vxBuf = {m_allVertices[0].data(), m_numAllVertices};
     m_vyBuf = {m_allVertices[1].data(), m_numAllVertices};
     m_vzBuf = {m_allVertices[2].data(), m_numAllVertices};

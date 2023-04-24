@@ -12,7 +12,6 @@
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Matrix4.h>
 #include <Magnum/Math/Range.h>
-#include <Magnum/GL/Mesh.h>
 #include <array>
 
 namespace CollisionSim {

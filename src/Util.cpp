@@ -5,7 +5,6 @@
  */
 
 #include "Util.h"
-#include <Corrade/Utility/Debug.h>
 #include <Magnum/Math/Algorithms/GramSchmidt.h>
 #include <stdexcept>
 

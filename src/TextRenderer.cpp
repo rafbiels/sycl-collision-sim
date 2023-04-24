@@ -7,10 +7,9 @@
 #include "TextRenderer.h"
 
 #include <Magnum/FileCallback.h>
+#include <Magnum/Math/Color.h>
 #include <Corrade/Utility/Resource.h>
 #include <Corrade/Containers/Optional.h>
-#include <Magnum/Math/Color.h>
-#include <string_view>
 
 // -----------------------------------------------------------------------------
 CollisionSim::Text::Text(Magnum::Text::AbstractFont& font,
@@ -20,13 +19,6 @@ CollisionSim::Text::Text(Magnum::Text::AbstractFont& font,
                          const Magnum::Math::Matrix3<float>& transform)
 : m_renderer(std::make_unique<Magnum::Text::Renderer2D>(font, glyphCache, size, alignment)),
 m_transform(transform) {}
-// m_renderer = std::make_unique<Magnum::Text::Renderer2D>(
-//     *m_font, *m_textGlyphCache, 32.0, Magnum::Text::Alignment::TopRight);
-// m_renderer.reserve(50, Magnum::GL::BufferUsage::DynamicDraw, Magnum::GL::BufferUsage::StaticDraw);
-// m_renderer->render("Hello");
-
-// m_transform = Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
-//               Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f);
 
 // -----------------------------------------------------------------------------
 CollisionSim::TextRenderer::TextRenderer() {

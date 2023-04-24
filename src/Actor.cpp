@@ -7,14 +7,11 @@
 #include "Actor.h"
 #include "Constants.h"
 #include "Util.h"
-#include <Corrade/Utility/Debug.h>
-#include <Magnum/MeshTools/Compile.h>
+#include <Magnum/MeshTools/Transform.h>
 #include <Magnum/Primitives/Cone.h>
 #include <Magnum/Primitives/Cube.h>
 #include <Magnum/Primitives/Cylinder.h>
 #include <Magnum/Primitives/Icosphere.h>
-#include <Magnum/Trade/MeshData.h>
-#include <limits>
 
 namespace {
 Magnum::Trade::MeshData scaledMesh(Magnum::Trade::MeshData&& meshData, float scale) {
@@ -37,14 +34,7 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
     auto vertices = Shape::meshData().positions3DAsArray();
     auto indices = Shape::meshData().indicesAsArray();
     size_t nFaces{indices.size()/3};
-    // Corrade::Utility::Debug{} << "Printing Actor meshdata " << vertices.size() << " vertices:";
-    // for (const auto& v : vertices) {
-    //     Corrade::Utility::Debug{} << v;
-    // }
-    // Corrade::Utility::Debug{} << "Printing Actor meshdata " << indices.size() << " indices:";
-    // for (const auto& idx : indices) {
-    //     Corrade::Utility::Debug{} << idx;
-    // }
+
     for (size_t iFace{0}; iFace<nFaces; ++iFace) {
         std::array<Magnum::Vector3,4> tetrahedron{
             Magnum::Vector3{0.0f, 0.0f, 0.0f},
@@ -80,16 +70,13 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
     m_centreOfMass = Util::round(m_centreOfMass);
     m_covariance = Util::round(m_covariance);
 
-    // Corrade::Utility::Debug{} << "Mass: " << m_mass << ", Centre of mass: " << m_centreOfMass;
     // Not sure about the translation step here
-    // Corrade::Utility::Debug{} << "Covariance before translation:\n" << m_covariance;
     auto dx = -1.0f * m_centreOfMass;
     m_covariance += m_mass * (
         Util::outerProduct(dx, Magnum::Vector3{}) +
         Util::outerProduct(Magnum::Vector3{}, dx) +
         Util::outerProduct(dx, dx)
     );
-    // Corrade::Utility::Debug{} << "Covariance after translation:\n" << m_covariance;
 
     m_bodyInertia = Magnum::Matrix3{Magnum::Math::IdentityInit, m_covariance.trace()} - m_covariance;
     m_bodyInertiaInv = m_bodyInertia.inverted();
@@ -129,14 +116,10 @@ void CollisionSim::Actor::computeState(float dtime) {
     m_linearMomentum += m_force * dtime;
     m_angularMomentum += m_torque * dtime;
 
-    // Corrade::Utility::Debug{} << "p = " << m_linearMomentum << ", L = " << m_angularMomentum;
-
     // Compute linear and angular velocity
     m_linearVelocity = m_linearMomentum / m_mass;
     m_inertiaInv =  rotation * m_bodyInertiaInv * rotation.transposed();
     m_angularVelocity = m_inertiaInv * m_angularMomentum;
-
-    // Corrade::Utility::Debug{} << "v = " << m_linearVelocity << ", omega = " << m_angularVelocity;
 
     // Apply translation and rotation
     auto star = [](const Magnum::Vector3& v) {
@@ -149,10 +132,6 @@ void CollisionSim::Actor::computeState(float dtime) {
     Magnum::Matrix3 drot = star(m_angularVelocity) * rotation * dtime;
     Magnum::Vector3 dx = m_linearVelocity * dtime;
 
-    // Corrade::Utility::Debug{} << "dx = " << dx << "\ndrot:\n" << drot;
-
-    // Corrade::Utility::Debug{} << "old trf =\n" << m_transformation;
-
     Magnum::Matrix4 trf{
         {drot[0][0], drot[0][1], drot[0][2], 0.0f},
         {drot[1][0], drot[1][1], drot[1][2], 0.0f},
@@ -162,11 +141,6 @@ void CollisionSim::Actor::computeState(float dtime) {
 
     transformation(transformation() + trf);
     updateVertexPositions();
-
-    // Corrade::Utility::Debug{} << "new trf =\n" << m_transformation;
-
-    // Corrade::Utility::Debug{} << "new pos = " << m_transformation.translation();
-    // Corrade::Utility::Debug{} << "new rot =\n" << m_transformation.rotation();
 
     // Reset force and torque
     m_force = {0, 0, 0};

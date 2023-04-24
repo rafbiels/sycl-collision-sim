@@ -7,7 +7,6 @@
 #ifndef COLLISION_SIM_TEXTRENDERER
 #define COLLISION_SIM_TEXTRENDERER
 
-#include <Corrade/PluginManager/Manager.h>
 #include <Magnum/Shaders/Shaders.h>
 #include <Magnum/Text/Alignment.h>
 #include <Magnum/Text/Renderer.h>
@@ -17,6 +16,7 @@
 #include <Magnum/Trade/AbstractImporter.h>
 #include <Magnum/Shaders/DistanceFieldVectorGL.h>
 #include <Magnum/Math/Matrix3.h>
+#include <Corrade/PluginManager/Manager.h>
 #include <unordered_map>
 #include <string_view>
 #include <memory>

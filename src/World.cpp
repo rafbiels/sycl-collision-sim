@@ -6,7 +6,6 @@
 
 #include "World.h"
 #include "Constants.h"
-#include <Magnum/Magnum.h>
 #include <Magnum/Primitives/Plane.h>
 
 // -----------------------------------------------------------------------------
