@@ -316,4 +316,34 @@ void collideWorldParallel(sycl::queue* queue, std::vector<Actor>& actors, State*
 
 }
 
+// -----------------------------------------------------------------------------
+void simulateSequential(float dtime, std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries) {
+    for (Actor& actor : actors) {
+        // Fix floating point loss of orthogonality in the rotation matrix
+        Util::orthonormaliseRotation(actor.transformation());
+    }
+    simulateMotionSequential(dtime, actors);
+    collideWorldSequential(actors, worldBoundaries);
+}
+
+// -----------------------------------------------------------------------------
+void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actors, State* state) {
+    for (Actor& actor : actors) {
+        // Fix floating point loss of orthogonality in the rotation matrix
+        Util::orthonormaliseRotation(actor.transformation());
+    }
+    state->load(actors);
+    state->resetBuffers(); // FIXME: is there a way to avoid doing this?
+    collideWorldParallel(queue, actors, state);
+    state->store(actors);
+
+    for (Actor& actor : actors) {
+        // Fix floating point loss of orthogonality in the rotation matrix
+        Util::orthonormaliseRotation(actor.transformation());
+    }
+    state->load(actors);
+    simulateMotionParallel(dtime, queue, actors, state);
+    state->store(actors);
+}
+
 } // namespace CollisionSim::Simulation

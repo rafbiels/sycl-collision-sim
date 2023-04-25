@@ -157,30 +157,9 @@ void CollisionSim::Application::compute() {
 
     // Compute collisions and rigid body motion
     if (m_cpuOnly) {
-        for (Actor& actor : m_actors) {
-            // Fix floating point loss of orthogonality in the rotation matrix
-            Util::orthonormaliseRotation(actor.transformation());
-        }
-        Simulation::collideWorldSequential(m_actors, m_world.boundaries());
-        Simulation::simulateMotionSequential(simDeltaTime, m_actors);
+        Simulation::simulateSequential(simDeltaTime, m_actors, m_world.boundaries());
     } else {
-        for (Actor& actor : m_actors) {
-            // Fix floating point loss of orthogonality in the rotation matrix
-            Util::orthonormaliseRotation(actor.transformation());
-        }
-        m_state->load(m_actors);
-        m_state->resetBuffers(); // FIXME: is there a way to avoid doing this?
-        Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
-        m_state->store(m_actors);
-
-        for (Actor& actor : m_actors) {
-            // Fix floating point loss of orthogonality in the rotation matrix
-            Util::orthonormaliseRotation(actor.transformation());
-        }
-        m_state->load(m_actors);
-        Simulation::simulateMotionParallel(simDeltaTime, m_syclQueue.get(), m_actors, m_state.get());
-        // Simulation::simulateMotionSequential(simDeltaTime, m_actors);
-        m_state->store(m_actors);
+        Simulation::simulateParallel(simDeltaTime, m_syclQueue.get(), m_actors, m_state.get());
     }
 }
 
