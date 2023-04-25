@@ -40,6 +40,9 @@ class Shape {
         /// Returns SoA vertex positions in world coordinate system
         const std::array<std::vector<float>,3>& vertexPositionsWorld() const;
 
+        /// Returns SoA vertex positions in world coordinate system
+        std::array<std::vector<float>,3>& vertexPositionsWorld_nonconst();
+
         /// Return the bounding box in world coordinate system
         Magnum::Range3D axisAlignedBoundingBox();
 

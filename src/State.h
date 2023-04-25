@@ -75,6 +75,9 @@ class State {
         /// Copy data from a vector of actors
         void load(const std::vector<Actor>& actors);
 
+        /// Copy data to a vector of actors
+        void store(std::vector<Actor>& actors) const;
+
         void resetBuffers();
 
         /// Const data getters
@@ -84,7 +87,8 @@ class State {
         const std::vector<uint16_t>& actorIndices() const {return m_actorIndices;}
         const std::vector<float>& mass() const {return m_mass;}
         const std::vector<float3x3>& bodyInertiaInv() const {return m_bodyInertiaInv;}
-        const std::array<std::vector<float>,3>& allVertices() const {return m_allVertices;}
+        const std::array<std::vector<float>,3>& verticesBody() const {return m_verticesBody;}
+        const std::array<std::vector<float>,3>& verticesWorld() const {return m_verticesWorld;}
         const std::vector<sycl::float3>& translation() const {return m_translation;}
         const std::vector<float3x3>& rotation() const {return m_rotation;}
         const std::vector<float3x3>& inertiaInv() const {return m_inertiaInv;}
@@ -106,6 +110,9 @@ class State {
         sycl::buffer<float,1>& vxBuf() {return m_vxBuf;}
         sycl::buffer<float,1>& vyBuf() {return m_vyBuf;}
         sycl::buffer<float,1>& vzBuf() {return m_vzBuf;}
+        sycl::buffer<float,1>& vxBodyBuf() {return m_vxBodyBuf;}
+        sycl::buffer<float,1>& vyBodyBuf() {return m_vyBodyBuf;}
+        sycl::buffer<float,1>& vzBodyBuf() {return m_vzBodyBuf;}
         sycl::buffer<sycl::float3,1>& translationBuf() {return m_translationBuf;}
         sycl::buffer<float3x3,1>& rotationBuf() {return m_rotationBuf;}
         sycl::buffer<float3x3,1>& inertiaInvBuf() {return m_inertiaInvBuf;}
@@ -124,10 +131,11 @@ class State {
         std::vector<uint16_t> m_actorIndices; // Caution: restricting numActors to 65536
         std::vector<float> m_mass;
         std::vector<float3x3> m_bodyInertiaInv;
+        std::array<std::vector<float>,3> m_verticesBody;
         ///@}
         /// Mutable data
         /// @{
-        std::array<std::vector<float>,3> m_allVertices;
+        std::array<std::vector<float>,3> m_verticesWorld;
         std::vector<sycl::float3> m_translation;
         std::vector<float3x3> m_rotation;
         std::vector<float3x3> m_inertiaInv;
@@ -144,6 +152,9 @@ class State {
         sycl::buffer<uint16_t,1> m_actorIndicesBuf;
         sycl::buffer<float,1> m_massBuf;
         sycl::buffer<float3x3,1> m_bodyInertiaInvBuf;
+        sycl::buffer<float,1> m_vxBodyBuf;
+        sycl::buffer<float,1> m_vyBodyBuf;
+        sycl::buffer<float,1> m_vzBodyBuf;
         sycl::buffer<float,1> m_vxBuf;
         sycl::buffer<float,1> m_vyBuf;
         sycl::buffer<float,1> m_vzBuf;

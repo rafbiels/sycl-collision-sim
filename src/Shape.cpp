@@ -75,6 +75,11 @@ const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorl
 }
 
 // -----------------------------------------------------------------------------
+std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorld_nonconst() {
+    return m_vertexPositionsWorld;
+}
+
+// -----------------------------------------------------------------------------
 Magnum::Range3D CollisionSim::Shape::axisAlignedBoundingBox() {
     Magnum::Range3D box{
         {m_vertexPositionsWorld[0][0], m_vertexPositionsWorld[1][0],m_vertexPositionsWorld[2][0]},

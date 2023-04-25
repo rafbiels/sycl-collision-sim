@@ -14,6 +14,7 @@
 
 class world_collision;
 class motion_simulation;
+class vertex_movement;
 
 namespace CollisionSim::Simulation {
 
@@ -100,11 +101,42 @@ void simulateMotionParallel(float dtime, sycl::queue* queue, std::vector<Actor>&
                     };
                 };
                 std::array<sycl::float3,3> drot = Util::msmul(
-                    Util::mmul(star(linearVelocityAcc[id]), rotationAcc[id]),
+                    Util::mmul(star(angularVelocityAcc[id]), rotationAcc[id]),
                     dtime);
                 rotationAcc[id][0] += drot[0];
                 rotationAcc[id][1] += drot[1];
                 rotationAcc[id][2] += drot[2];
+            });
+        }).wait_and_throw();
+
+        // Update vertex positions
+        queue->submit([&](sycl::handler& cgh){
+            sycl::accessor actorIndicesAcc{state->actorIndicesBuf(), cgh, sycl::read_only};
+            sycl::accessor translationAcc{state->translationBuf(), cgh, sycl::read_only};
+            sycl::accessor rotationAcc{state->rotationBuf(), cgh, sycl::read_only};
+            sycl::accessor vxBodyAcc{state->vxBodyBuf(), cgh, sycl::read_only};
+            sycl::accessor vyBodyAcc{state->vyBodyBuf(), cgh, sycl::read_only};
+            sycl::accessor vzBodyAcc{state->vzBodyBuf(), cgh, sycl::read_only};
+            sycl::accessor vxAcc{state->vxBuf(), cgh, sycl::write_only, sycl::no_init};
+            sycl::accessor vyAcc{state->vyBuf(), cgh, sycl::write_only, sycl::no_init};
+            sycl::accessor vzAcc{state->vzBuf(), cgh, sycl::write_only, sycl::no_init};
+            cgh.parallel_for<vertex_movement>(state->numAllVertices(), [=](sycl::id<1> id){
+                uint16_t iActor = actorIndicesAcc[id];
+                vxAcc[id] =
+                    rotationAcc[iActor][0][0]*vxBodyAcc[id] +
+                    rotationAcc[iActor][1][0]*vyBodyAcc[id] +
+                    rotationAcc[iActor][2][0]*vzBodyAcc[id] +
+                    translationAcc[iActor][0];
+                vyAcc[id] =
+                    rotationAcc[iActor][0][1]*vxBodyAcc[id] +
+                    rotationAcc[iActor][1][1]*vyBodyAcc[id] +
+                    rotationAcc[iActor][2][1]*vzBodyAcc[id] +
+                    translationAcc[iActor][1];
+                vzAcc[id] =
+                    rotationAcc[iActor][0][2]*vxBodyAcc[id] +
+                    rotationAcc[iActor][1][2]*vyBodyAcc[id] +
+                    rotationAcc[iActor][2][2]*vzBodyAcc[id] +
+                    translationAcc[iActor][2];
             });
         }).wait_and_throw();
     } catch (const std::exception& ex) {

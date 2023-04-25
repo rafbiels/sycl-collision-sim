@@ -114,6 +114,22 @@ constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
 constexpr Magnum::Vector3 toMagnum(const sycl::float3& vec) {
     return Magnum::Vector3{vec[0],vec[1],vec[2]};
 }
+constexpr Magnum::Matrix3 toMagnum(const std::array<sycl::float3,3>& mat) {
+    return Magnum::Matrix3{
+        Magnum::Vector3{mat[0][0], mat[0][1], mat[0][2]},
+        Magnum::Vector3{mat[1][0], mat[1][1], mat[1][2]},
+        Magnum::Vector3{mat[2][0], mat[2][1], mat[2][2]},
+    };
+}
+constexpr Magnum::Matrix4 transformationMatrix(const sycl::float3& translation,
+                                               const std::array<sycl::float3,3>& rotation) {
+    return Magnum::Matrix4{
+        Magnum::Vector4{rotation[0][0], rotation[0][1], rotation[0][2], 0.0f},
+        Magnum::Vector4{rotation[1][0], rotation[1][1], rotation[1][2], 0.0f},
+        Magnum::Vector4{rotation[2][0], rotation[2][1], rotation[2][2], 0.0f},
+        Magnum::Vector4{translation[0], translation[1], translation[2], 1.0f}
+    };
+}
 ///@}
 
 /// SYCL matrix-scalar multiplication
