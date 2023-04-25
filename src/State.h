@@ -17,36 +17,46 @@
 
 namespace CollisionSim {
 
-class WallCollisionCache {
-    public:
-        WallCollisionCache(const Magnum::Range3D& worldBoundaries, size_t numAllVertices);
-        WallCollisionCache(const WallCollisionCache&) = delete;
-        WallCollisionCache(WallCollisionCache&&) = delete;
-        WallCollisionCache& operator=(const WallCollisionCache&) = delete;
-        WallCollisionCache& operator=(WallCollisionCache&&) = delete;
-        const std::array<float,6>& boundaries() const {return m_boundaries;}
-        const std::vector<Wall>& collisions() const {return m_collisions;}
-        const std::vector<sycl::float3>& addLinearVelocity() const {return m_addLinearVelocity;}
-        const std::vector<sycl::float3>& addAngularVelocity() const {return m_addAngularVelocity;}
-        sycl::buffer<float,1>& boundariesBuf() {return m_boundariesBuf;}
-        sycl::buffer<Wall,1>& collisionsBuf() {return m_collisionsBuf;}
-        sycl::buffer<sycl::float3,1>& addLinearVelocityBuf() {return m_addLinearVelocityBuf;}
-        sycl::buffer<sycl::float3,1>& addAngularVelocityBuf() {return m_addAngularVelocityBuf;}
-        void resetBuffers();
-    private:
-        ///@{ Data
-        std::array<float,6> m_boundaries;
-        std::vector<Wall> m_collisions;
-        std::vector<sycl::float3> m_addLinearVelocity;
-        std::vector<sycl::float3> m_addAngularVelocity;
-        ///@}
+enum class StateVariable : uint8_t {
+    ActorIndices=0, Mass, BodyInertiaInv, BodyVertexX, BodyVertexY, BodyVertexZ,
+    VertexX, VertexY, VertexZ, Translation, Rotation, InertiaInv,
+    LinearVelocity, AngularVelocity, LinearMomentum, AngularMomentum,
+    Force, Torque, WallCollisions, WorldBoundaries,
+    MAX
+};
 
-        ///@{ Buffers
-        sycl::buffer<float,1> m_boundariesBuf;
-        sycl::buffer<Wall,1> m_collisionsBuf;
-        sycl::buffer<sycl::float3,1> m_addLinearVelocityBuf;
-        sycl::buffer<sycl::float3,1> m_addAngularVelocityBuf;
-        ///@}
+template<typename T>
+struct USMData {
+    USMData() = delete;
+    explicit USMData(size_t count, sycl::queue* q)
+        : queue{q}, hostContainer(count), devicePointer{sycl::malloc_device<T>(count, *q)} {}
+    ~USMData() {
+        sycl::free(devicePointer, *queue);
+    }
+    USMData(const USMData&) = delete;
+    USMData(USMData&&) = delete;
+    USMData& operator=(const USMData&) = delete;
+    USMData& operator=(USMData&&) = delete;
+    sycl::event copyToDevice() const {
+        Corrade::Utility::Debug{} << "Enqueuing h2d copy from " << hostContainer.data() << " to " << devicePointer << "(" << hostContainer.size() << " elements)";
+        return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size());
+    }
+    sycl::event copyToDevice(sycl::event depEvent) const {
+        Corrade::Utility::Debug{} << "Enqueuing h2d copy from " << hostContainer.data() << " to " << devicePointer << "(" << hostContainer.size() << " elements)";
+        return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size(), depEvent);
+    }
+    sycl::event copyToHost() {
+        Corrade::Utility::Debug{} << "Enqueuing d2h copy from " << devicePointer << " to " << hostContainer.data() << "(" << hostContainer.size() << " elements)";
+        return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size());
+    }
+    sycl::event copyToHost(sycl::event depEvent) {
+        Corrade::Utility::Debug{} << "Enqueuing d2h copy from " << devicePointer << " to " << hostContainer.data() << "(" << hostContainer.size() << " elements)";
+        return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size(), depEvent);
+    }
+
+    sycl::queue* queue; // non-owning pointer
+    std::vector<T> hostContainer;
+    T* devicePointer; // owning pointer
 };
 
 /**
@@ -62,7 +72,10 @@ class State {
         /**
          * Constructor from a vector of actors
          */
-        State(const Magnum::Range3D& worldBoundaries, const std::vector<Actor>& actors, size_t numAllVertices);
+        State(const Magnum::Range3D& worldBoundaries,
+              const std::vector<Actor>& actors,
+              size_t numAllVertices,
+              sycl::queue* queue);
 
         /// Copy and assignment explicitly deleted
         ///@{
@@ -72,102 +85,28 @@ class State {
         State& operator=(State&&) = delete;
         ///}
 
-        /// Copy data from a vector of actors
-        void load(const std::vector<Actor>& actors);
+        /// Enqueue copy of all data to the device and return immediately
+        void copyAllToDeviceAsync() const;
 
-        /// Copy data to a vector of actors
-        void store(std::vector<Actor>& actors) const;
+        size_t numActors{0};
+        size_t numAllVertices{0};
 
-        void resetBuffers();
-
-        /// Const data getters
-        ///{@
-        size_t numActors() const {return m_numActors;}
-        size_t numAllVertices() const {return m_numAllVertices;}
-        const std::vector<uint16_t>& actorIndices() const {return m_actorIndices;}
-        const std::vector<float>& mass() const {return m_mass;}
-        const std::vector<float3x3>& bodyInertiaInv() const {return m_bodyInertiaInv;}
-        const std::array<std::vector<float>,3>& verticesBody() const {return m_verticesBody;}
-        const std::array<std::vector<float>,3>& verticesWorld() const {return m_verticesWorld;}
-        const std::vector<sycl::float3>& translation() const {return m_translation;}
-        const std::vector<float3x3>& rotation() const {return m_rotation;}
-        const std::vector<float3x3>& inertiaInv() const {return m_inertiaInv;}
-        const std::vector<sycl::float3>& linearVelocity() const {return m_linearVelocity;}
-        const std::vector<sycl::float3>& angularVelocity() const {return m_angularVelocity;}
-        const std::vector<sycl::float3>& linearMomentum() const {return m_linearMomentum;}
-        const std::vector<sycl::float3>& angularMomentum() const {return m_angularMomentum;}
-        const std::vector<sycl::float3>& force() const {return m_force;}
-        const std::vector<sycl::float3>& torque() const {return m_torque;}
-        ///@}
-
-        WallCollisionCache& wallCollisionCache() {return m_wallCollisionCache;}
-
-        /// Buffer getters
-        ///{@
-        sycl::buffer<uint16_t,1>& actorIndicesBuf() {return m_actorIndicesBuf;}
-        sycl::buffer<float,1>& massBuf() {return m_massBuf;}
-        sycl::buffer<float3x3,1>& bodyInertiaInvBuf() {return m_bodyInertiaInvBuf;}
-        sycl::buffer<float,1>& vxBuf() {return m_vxBuf;}
-        sycl::buffer<float,1>& vyBuf() {return m_vyBuf;}
-        sycl::buffer<float,1>& vzBuf() {return m_vzBuf;}
-        sycl::buffer<float,1>& vxBodyBuf() {return m_vxBodyBuf;}
-        sycl::buffer<float,1>& vyBodyBuf() {return m_vyBodyBuf;}
-        sycl::buffer<float,1>& vzBodyBuf() {return m_vzBodyBuf;}
-        sycl::buffer<sycl::float3,1>& translationBuf() {return m_translationBuf;}
-        sycl::buffer<float3x3,1>& rotationBuf() {return m_rotationBuf;}
-        sycl::buffer<float3x3,1>& inertiaInvBuf() {return m_inertiaInvBuf;}
-        sycl::buffer<sycl::float3,1>& linearVelocityBuf() {return m_linearVelocityBuf;}
-        sycl::buffer<sycl::float3,1>& angularVelocityBuf() {return m_angularVelocityBuf;}
-        sycl::buffer<sycl::float3,1>& linearMomentumBuf() {return m_linearMomentumBuf;}
-        sycl::buffer<sycl::float3,1>& angularMomentumBuf() {return m_angularMomentumBuf;}
-        sycl::buffer<sycl::float3,1>& forceBuf() {return m_forceBuf;}
-        sycl::buffer<sycl::float3,1>& torqueBuf() {return m_torqueBuf;}
-        ///@}
-    private:
-        /// Constants
-        ///@{
-        size_t m_numActors{0};
-        size_t m_numAllVertices{0};
-        std::vector<uint16_t> m_actorIndices; // Caution: restricting numActors to 65536
-        std::vector<float> m_mass;
-        std::vector<float3x3> m_bodyInertiaInv;
-        std::array<std::vector<float>,3> m_verticesBody;
-        ///@}
-        /// Mutable data
-        /// @{
-        std::array<std::vector<float>,3> m_verticesWorld;
-        std::vector<sycl::float3> m_translation;
-        std::vector<float3x3> m_rotation;
-        std::vector<float3x3> m_inertiaInv;
-        std::vector<sycl::float3> m_linearVelocity;
-        std::vector<sycl::float3> m_angularVelocity;
-        std::vector<sycl::float3> m_linearMomentum;
-        std::vector<sycl::float3> m_angularMomentum;
-        std::vector<sycl::float3> m_force;
-        std::vector<sycl::float3> m_torque;
-        WallCollisionCache m_wallCollisionCache;
-        ///@}
-        /// SYCL buffers
-        ///@{
-        sycl::buffer<uint16_t,1> m_actorIndicesBuf;
-        sycl::buffer<float,1> m_massBuf;
-        sycl::buffer<float3x3,1> m_bodyInertiaInvBuf;
-        sycl::buffer<float,1> m_vxBodyBuf;
-        sycl::buffer<float,1> m_vyBodyBuf;
-        sycl::buffer<float,1> m_vzBodyBuf;
-        sycl::buffer<float,1> m_vxBuf;
-        sycl::buffer<float,1> m_vyBuf;
-        sycl::buffer<float,1> m_vzBuf;
-        sycl::buffer<sycl::float3,1> m_translationBuf;
-        sycl::buffer<float3x3,1> m_rotationBuf;
-        sycl::buffer<float3x3,1> m_inertiaInvBuf;
-        sycl::buffer<sycl::float3,1> m_linearVelocityBuf;
-        sycl::buffer<sycl::float3,1> m_angularVelocityBuf;
-        sycl::buffer<sycl::float3,1> m_linearMomentumBuf;
-        sycl::buffer<sycl::float3,1> m_angularMomentumBuf;
-        sycl::buffer<sycl::float3,1> m_forceBuf;
-        sycl::buffer<sycl::float3,1> m_torqueBuf;
-        ///}
+        USMData<float> worldBoundaries;
+        USMData<uint16_t> actorIndices; // Caution: restricting numActors to 65536
+        USMData<float> mass;
+        USMData<float3x3> bodyInertiaInv;
+        std::array<USMData<float>,3> bodyVertices;
+        std::array<USMData<float>,3> worldVertices;
+        USMData<sycl::float3> translation;
+        USMData<float3x3> rotation;
+        USMData<float3x3> inertiaInv;
+        USMData<sycl::float3> linearVelocity;
+        USMData<sycl::float3> angularVelocity;
+        USMData<sycl::float3> linearMomentum;
+        USMData<sycl::float3> angularMomentum;
+        USMData<sycl::float3> force;
+        USMData<sycl::float3> torque;
+        USMData<Wall> wallCollisions;
 };
 } // namespace CollisionSim
 

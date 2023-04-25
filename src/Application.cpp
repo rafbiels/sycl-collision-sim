@@ -47,13 +47,20 @@ m_syclQueue{nullptr}
     }
 
     createActors();
-    m_state = std::make_unique<State>(m_world.boundaries(), m_actors, m_numAllVertices);
 
     if (!m_cpuOnly) {
-        m_syclQueue = std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{});
-        Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
-        // Kernel warm-up
-        Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+        try {
+            m_syclQueue = std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{});
+            m_state = std::make_unique<State>(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.get());
+            Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
+            // Copy initial data to the device
+            m_state->copyAllToDeviceAsync();
+            m_syclQueue->wait_and_throw();
+            // // Kernel warm-up
+            // Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
+        } catch (const std::exception& ex) {
+            Corrade::Utility::Error{} << "Exception caught: " << ex.what();
+        }
     }
 
     m_textRenderer.newText("cfps",
