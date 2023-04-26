@@ -76,13 +76,16 @@ void simulateMotionParallel(float dtime, sycl::queue* queue, std::vector<Actor>&
             state->torque.copyToDevice()
         };
         sycl::event::wait_and_throw(h2dCopyEvents);
+        sycl::float3* linearMomentum = state->linearMomentum.devicePointer;
 
         sycl::event motionSimEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
             auto os = sycl::stream{65536, 1024, cgh};
             cgh.parallel_for<motion_simulation>(state->numActors, [=](sycl::id<1> id){
                 // Compute linear and angular momentum
-                os << "linearMomentum.devicePointer = " << state->linearMomentum.devicePointer[id] << "\n";
+                os << "id = " << id << "\n";
+                // os << "linearMomentum.devicePointer = " << linearMomentum << "\n";
+                // os << "linearMomentum.devicePointer[" << id << "] = " << linearMomentum[id] << "\n";
                 // os << "linearMomentum.devicePointer[id] = " << state->linearMomentum.devicePointer[id] << "\n";
                 // os << "force.devicePointer = " << state->force.devicePointer << "\n";
                 // os << "force.devicePointer[id] = " << state->force.devicePointer[id] << "\n";
@@ -120,26 +123,30 @@ void simulateMotionParallel(float dtime, sycl::queue* queue, std::vector<Actor>&
 
         sycl::event::wait_and_throw({motionSimEvent});
         // Update vertex positions
-        sycl::event vertexMoveEvent = queue->parallel_for<vertex_movement>(
-                state->numAllVertices,
-                {motionSimEvent},
-                [=](sycl::id<1> id){
-            uint16_t iActor = state->actorIndices.devicePointer[id];
-            state->worldVertices[0].devicePointer[id] =
-                state->rotation.devicePointer[iActor][0][0]*state->bodyVertices[0].devicePointer[id] +
-                state->rotation.devicePointer[iActor][1][0]*state->bodyVertices[1].devicePointer[id] +
-                state->rotation.devicePointer[iActor][2][0]*state->bodyVertices[2].devicePointer[id] +
-                state->translation.devicePointer[iActor][0];
-            state->worldVertices[1].devicePointer[id] =
-                state->rotation.devicePointer[iActor][0][1]*state->bodyVertices[0].devicePointer[id] +
-                state->rotation.devicePointer[iActor][1][1]*state->bodyVertices[1].devicePointer[id] +
-                state->rotation.devicePointer[iActor][2][1]*state->bodyVertices[2].devicePointer[id] +
-                state->translation.devicePointer[iActor][1];
-            state->worldVertices[2].devicePointer[id] =
-                state->rotation.devicePointer[iActor][0][2]*state->bodyVertices[0].devicePointer[id] +
-                state->rotation.devicePointer[iActor][1][2]*state->bodyVertices[1].devicePointer[id] +
-                state->rotation.devicePointer[iActor][2][2]*state->bodyVertices[2].devicePointer[id] +
-                state->translation.devicePointer[iActor][2];
+
+        sycl::event vertexMoveEvent = queue->submit([&](sycl::handler& cgh){
+            cgh.depends_on(motionSimEvent);
+            auto os = sycl::stream{65536, 1024, cgh};
+            cgh.parallel_for<vertex_movement>(state->numAllVertices, [=](sycl::id<1> id){
+                os << "id = " << id << "\n";
+                uint16_t iActor = state->actorIndices.devicePointer[id];
+                // os << "vertex_movement iActor[" << id << "] = " << iActor << "\n";
+                // state->worldVertices[0].devicePointer[id] =
+                //     state->rotation.devicePointer[iActor][0][0]*state->bodyVertices[0].devicePointer[id] +
+                //     state->rotation.devicePointer[iActor][1][0]*state->bodyVertices[1].devicePointer[id] +
+                //     state->rotation.devicePointer[iActor][2][0]*state->bodyVertices[2].devicePointer[id] +
+                //     state->translation.devicePointer[iActor][0];
+                // state->worldVertices[1].devicePointer[id] =
+                //     state->rotation.devicePointer[iActor][0][1]*state->bodyVertices[0].devicePointer[id] +
+                //     state->rotation.devicePointer[iActor][1][1]*state->bodyVertices[1].devicePointer[id] +
+                //     state->rotation.devicePointer[iActor][2][1]*state->bodyVertices[2].devicePointer[id] +
+                //     state->translation.devicePointer[iActor][1];
+                // state->worldVertices[2].devicePointer[id] =
+                //     state->rotation.devicePointer[iActor][0][2]*state->bodyVertices[0].devicePointer[id] +
+                //     state->rotation.devicePointer[iActor][1][2]*state->bodyVertices[1].devicePointer[id] +
+                //     state->rotation.devicePointer[iActor][2][2]*state->bodyVertices[2].devicePointer[id] +
+                //     state->translation.devicePointer[iActor][2];
+            });
         });
 
         sycl::event::wait_and_throw({vertexMoveEvent});
