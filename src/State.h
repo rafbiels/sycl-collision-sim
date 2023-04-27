@@ -98,7 +98,6 @@ class State {
 
         /// Motion simulation variables
         ///@{
-        std::array<USMData<float>,3> worldVertices;
         USMData<sycl::float3> translation;
         USMData<float3x3> rotation;
         USMData<float3x3> inertiaInv;

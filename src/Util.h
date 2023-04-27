@@ -178,6 +178,34 @@ constexpr std::array<sycl::float3,3> transpose(const std::array<sycl::float3,3>&
     };
 }
 
+/// SYCL 3x3 matrix inverse
+constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& mat) {
+    float a{mat[0][0]};
+    float b{mat[1][0]};
+    float c{mat[2][0]};
+    float d{mat[0][1]};
+    float e{mat[1][1]};
+    float f{mat[2][1]};
+    float g{mat[0][2]};
+    float h{mat[1][2]};
+    float i{mat[2][2]};
+    float A{e*i - f*h};
+    float B{f*g - d*i};
+    float C{d*h - e*g};
+    float D{c*h - b*i};
+    float E{a*i - c*g};
+    float F{b*g - a*h};
+    float G{b*f - c*e};
+    float H{c*d - a*f};
+    float I{a*e - b*d};
+    float detInv{1.0f/(a*A + b*B + c*C)};
+    return {
+        detInv * sycl::float3{A, B, C},
+        detInv * sycl::float3{D, E, F},
+        detInv * sycl::float3{G, H, I}
+    };
+}
+
 } // namespace CollisionSim::Util
 
 #endif // COLLISION_SIM_UTIL

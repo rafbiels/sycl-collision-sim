@@ -22,9 +22,6 @@ CollisionSim::State::State(const Magnum::Range3D& worldBounds,
   bodyVertices{USMData<float>{numAllVertices, queue},
                USMData<float>{numAllVertices, queue},
                USMData<float>{numAllVertices, queue}},
-  worldVertices{USMData<float>{numAllVertices, queue},
-                USMData<float>{numAllVertices, queue},
-                USMData<float>{numAllVertices, queue}},
   translation{actors.size(), queue},
   rotation{actors.size(), queue},
   inertiaInv{actors.size(), queue},
@@ -59,15 +56,11 @@ CollisionSim::State::State(const Magnum::Range3D& worldBounds,
         torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
 
         const auto& actorBodyVertices = actors[iActor].vertexPositions();
-        const auto& actorWorldVertices = actors[iActor].vertexPositionsWorld();
         const size_t numVerticesThisActor{actorBodyVertices[0].size()};
         std::fill(actorIndices.hostContainer.begin()+vertexOffset, actorIndices.hostContainer.begin()+vertexOffset+numVerticesThisActor, iActor);
         std::copy(actorBodyVertices[0].begin(), actorBodyVertices[0].end(), bodyVertices[0].hostContainer.begin()+vertexOffset);
         std::copy(actorBodyVertices[1].begin(), actorBodyVertices[1].end(), bodyVertices[1].hostContainer.begin()+vertexOffset);
         std::copy(actorBodyVertices[2].begin(), actorBodyVertices[2].end(), bodyVertices[2].hostContainer.begin()+vertexOffset);
-        std::copy(actorWorldVertices[0].begin(), actorWorldVertices[0].end(), worldVertices[0].hostContainer.begin()+vertexOffset);
-        std::copy(actorWorldVertices[1].begin(), actorWorldVertices[1].end(), worldVertices[1].hostContainer.begin()+vertexOffset);
-        std::copy(actorWorldVertices[2].begin(), actorWorldVertices[2].end(), worldVertices[2].hostContainer.begin()+vertexOffset);
         vertexOffset += numVerticesThisActor;
     }
 }
@@ -81,9 +74,6 @@ void CollisionSim::State::copyAllToDeviceAsync() const {
     bodyVertices[0].copyToDevice();
     bodyVertices[1].copyToDevice();
     bodyVertices[2].copyToDevice();
-    worldVertices[0].copyToDevice();
-    worldVertices[1].copyToDevice();
-    worldVertices[2].copyToDevice();
     translation.copyToDevice();
     rotation.copyToDevice();
     inertiaInv.copyToDevice();

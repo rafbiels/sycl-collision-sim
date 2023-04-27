@@ -158,25 +158,14 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
     // Copy inputs from Actor objects to serial state data
     for (size_t iActor{0}; iActor<state->numActors; ++iActor) {
         state->linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
-        state->inertiaInv.hostContainer[iActor] = Util::toSycl(actors[iActor].inertiaInv());
-        state->translation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().translation());
-        state->rotation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().rotationScaling());
-        state->linearMomentum.hostContainer[iActor] = Util::toSycl(actors[iActor].linearMomentum());
-        state->angularMomentum.hostContainer[iActor] = Util::toSycl(actors[iActor].angularMomentum());
+        state->angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
         state->force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
         state->torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
     }
     try {
         std::vector<sycl::event> h2dCopyEvents{
-            // state->worldVertices[0].copyToDevice(),
-            // state->worldVertices[1].copyToDevice(),
-            // state->worldVertices[2].copyToDevice(),
-            // state->translation.copyToDevice(),
-            // state->rotation.copyToDevice(),
             state->linearVelocity.copyToDevice(),
-            // state->inertiaInv.copyToDevice(),
-            state->linearMomentum.copyToDevice(),
-            state->angularMomentum.copyToDevice(),
+            state->angularVelocity.copyToDevice(),
             state->force.copyToDevice(),
             state->torque.copyToDevice()
         };
@@ -192,37 +181,33 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
         sycl::float3* addLinearVelocity = state->addLinearVelocity.devicePointer;
         sycl::float3* addAngularVelocity = state->addAngularVelocity.devicePointer;
         Wall* wallCollisions = state->wallCollisions.devicePointer;
-        std::array<float*,3> worldVertices = {
-            state->worldVertices[0].devicePointer,
-            state->worldVertices[1].devicePointer,
-            state->worldVertices[2].devicePointer
-        };
         float3x3* bodyInertiaInv = state->bodyInertiaInv.devicePointer;
         std::array<float*,3> bodyVertices = {
             state->bodyVertices[0].devicePointer,
             state->bodyVertices[1].devicePointer,
             state->bodyVertices[2].devicePointer
         };
-        sycl::float3* linearMomentum = state->linearMomentum.devicePointer;
-        sycl::float3* angularMomentum = state->angularMomentum.devicePointer;
         sycl::float3* angularVelocity = state->angularVelocity.devicePointer;
         float3x3* rotation = state->rotation.devicePointer;
         sycl::float3* force = state->force.devicePointer;
         sycl::float3* torque = state->torque.devicePointer;
 
-        sycl::event motionSimEvent = queue->submit([&](sycl::handler& cgh){
+        sycl::event actorKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
             cgh.parallel_for<actor_kernel>(state->numActors, [=](sycl::id<1> id){
                 // Compute linear and angular momentum
-                linearMomentum[id] += force[id] * dtime;
-                angularMomentum[id] += torque[id] * dtime;
+                auto linearMomentum = mass[id] * linearVelocity[id];
+                auto angularMomentum = Util::mvmul(Util::inverse(inertiaInv[id]), angularVelocity[id]);
+
+                linearMomentum += force[id] * dtime;
+                angularMomentum += torque[id] * dtime;
 
                 // Compute linear and angular velocity
-                linearVelocity[id] = linearMomentum[id] / mass[id];
+                linearVelocity[id] = linearMomentum / mass[id];
                 inertiaInv[id] = Util::mmul(
                     Util::mmul(rotation[id], bodyInertiaInv[id]),
                     Util::transpose(rotation[id])); // R * Ib^-1 * R^T
-                angularVelocity[id] = Util::mvmul(inertiaInv[id], angularMomentum[id]);
+                angularVelocity[id] = Util::mvmul(inertiaInv[id], angularMomentum);
 
                 // Apply translation
                 translation[id] += linearVelocity[id] * dtime;
@@ -245,37 +230,35 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
         });
 
         // Update vertex positions and calculate world collisions
-        sycl::event worldCollisionEvent = queue->submit([&](sycl::handler& cgh){
-            cgh.depends_on(motionSimEvent);
+        sycl::event vertexKernelEvent = queue->submit([&](sycl::handler& cgh){
+            cgh.depends_on(actorKernelEvent);
             cgh.parallel_for<vertex_kernel>(state->numAllVertices, [=](sycl::id<1> id){
                 uint16_t iActor = actorIndices[id];
 
-                worldVertices[0][id] =
+                sycl::float3 vertex{
                     rotation[iActor][0][0]*bodyVertices[0][id] +
                     rotation[iActor][1][0]*bodyVertices[1][id] +
                     rotation[iActor][2][0]*bodyVertices[2][id] +
-                    translation[iActor][0];
-                worldVertices[1][id] =
+                    translation[iActor][0],
                     rotation[iActor][0][1]*bodyVertices[0][id] +
                     rotation[iActor][1][1]*bodyVertices[1][id] +
                     rotation[iActor][2][1]*bodyVertices[2][id] +
-                    translation[iActor][1];
-                worldVertices[2][id] =
+                    translation[iActor][1],
                     rotation[iActor][0][2]*bodyVertices[0][id] +
                     rotation[iActor][1][2]*bodyVertices[1][id] +
                     rotation[iActor][2][2]*bodyVertices[2][id] +
-                    translation[iActor][2];
+                    translation[iActor][2]
+                };
 
                 Wall collision{Wall::None};
-                collision |= (WallUnderlyingType{worldVertices[0][id] <= worldBoundaries[0]} << 0);
-                collision |= (WallUnderlyingType{worldVertices[0][id] >= worldBoundaries[1]} << 1);
-                collision |= (WallUnderlyingType{worldVertices[1][id] <= worldBoundaries[2]} << 2);
-                collision |= (WallUnderlyingType{worldVertices[1][id] >= worldBoundaries[3]} << 3);
-                collision |= (WallUnderlyingType{worldVertices[2][id] <= worldBoundaries[4]} << 4);
-                collision |= (WallUnderlyingType{worldVertices[2][id] >= worldBoundaries[5]} << 5);
+                collision |= (WallUnderlyingType{vertex[0] <= worldBoundaries[0]} << 0);
+                collision |= (WallUnderlyingType{vertex[0] >= worldBoundaries[1]} << 1);
+                collision |= (WallUnderlyingType{vertex[1] <= worldBoundaries[2]} << 2);
+                collision |= (WallUnderlyingType{vertex[1] >= worldBoundaries[3]} << 3);
+                collision |= (WallUnderlyingType{vertex[2] <= worldBoundaries[4]} << 4);
+                collision |= (WallUnderlyingType{vertex[2] >= worldBoundaries[5]} << 5);
 
                 sycl::float3 normal = wallNormal(collision);
-                sycl::float3 vertex{worldVertices[0][id], worldVertices[1][id], worldVertices[2][id]};
                 sycl::float3 radius{vertex - translation[iActor]};
                 sycl::float3 a{sycl::cross(radius, normal)};
                 sycl::float3 b{Util::mvmul(inertiaInv[iActor], a)};
@@ -293,18 +276,13 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
         });
 
         std::vector<sycl::event> d2hCopyEvents{
-            state->wallCollisions.copyToHost(worldCollisionEvent),
-            state->addLinearVelocity.copyToHost(worldCollisionEvent),
-            state->addAngularVelocity.copyToHost(worldCollisionEvent),
-            state->translation.copyToHost(worldCollisionEvent),
-            state->rotation.copyToHost(worldCollisionEvent),
-            // state->linearMomentum.copyToHost(worldCollisionEvent),
-            // state->angularMomentum.copyToHost(worldCollisionEvent),
-            state->linearVelocity.copyToHost(worldCollisionEvent),
-            state->angularVelocity.copyToHost(worldCollisionEvent),
-            // state->worldVertices[0].copyToHost(worldCollisionEvent),
-            // state->worldVertices[1].copyToHost(worldCollisionEvent),
-            // state->worldVertices[2].copyToHost(worldCollisionEvent)
+            state->wallCollisions.copyToHost(vertexKernelEvent),
+            state->addLinearVelocity.copyToHost(vertexKernelEvent),
+            state->addAngularVelocity.copyToHost(vertexKernelEvent),
+            state->translation.copyToHost(vertexKernelEvent),
+            state->rotation.copyToHost(vertexKernelEvent),
+            state->linearVelocity.copyToHost(vertexKernelEvent),
+            state->angularVelocity.copyToHost(vertexKernelEvent)
         };
         sycl::event::wait_and_throw(d2hCopyEvents);
     } catch (const std::exception& ex) {
@@ -322,13 +300,11 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
         actors[iActor].angularVelocity(Util::toMagnum(state->angularVelocity.hostContainer[iActor]));
         actors[iActor].linearMomentum( actors[iActor].mass() * actors[iActor].linearVelocity());
         actors[iActor].angularMomentum( actors[iActor].inertiaInv().inverted() * actors[iActor].angularVelocity());
-        // actors[iActor].linearMomentum(Util::toMagnum(state->linearMomentum.hostContainer[iActor]));
-        // actors[iActor].angularMomentum(Util::toMagnum(state->angularMomentum.hostContainer[iActor]));
         // Fix floating point loss of orthogonality in the rotation matrix
         Util::orthonormaliseRotation(actors[iActor].transformation());
     }
 
-    // Aggregate per-vertex world collision outputs and apply actor velocity change
+    // Reduce per-vertex world collision outputs to per-actor values and apply actor velocity change
     struct CollisionData {
         Wall type{Wall::None};
         std::vector<sycl::float3> addLinearV;
