@@ -9,7 +9,7 @@
 #include <algorithm>
 
 // -----------------------------------------------------------------------------
-CollisionSim::State::State(const Magnum::Range3D& worldBoundaries,
+CollisionSim::State::State(const Magnum::Range3D& worldBounds,
                            const std::vector<Actor>& actors,
                            size_t numAllVertices,
                            sycl::queue* queue)
@@ -34,15 +34,29 @@ CollisionSim::State::State(const Magnum::Range3D& worldBoundaries,
   angularMomentum{actors.size(), queue},
   force{actors.size(), queue},
   torque{actors.size(), queue},
-  wallCollisions{numAllVertices, queue} {
+  wallCollisions{numAllVertices, queue},
+  addLinearVelocity{numAllVertices, queue},
+  addAngularVelocity{numAllVertices, queue} {
+
+    worldBoundaries.hostContainer.assign({
+        worldBounds.min()[0], worldBounds.max()[0],
+        worldBounds.min()[1], worldBounds.max()[1],
+        worldBounds.min()[2], worldBounds.max()[2],
+    });
 
     size_t vertexOffset{0};
     for (size_t iActor{0}; iActor<numActors; ++iActor) {
         mass.hostContainer[iActor] = actors[iActor].mass();
         bodyInertiaInv.hostContainer[iActor] = Util::toSycl(actors[iActor].bodyInertiaInv());
         translation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().translation());
+        rotation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().rotationScaling());
         inertiaInv.hostContainer[iActor] = Util::toSycl(actors[iActor].inertiaInv());
         linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
+        angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].angularVelocity());
+        linearMomentum.hostContainer[iActor] = Util::toSycl(actors[iActor].linearMomentum());
+        angularMomentum.hostContainer[iActor] = Util::toSycl(actors[iActor].angularMomentum());
+        force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
+        torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
 
         const auto& actorBodyVertices = actors[iActor].vertexPositions();
         const auto& actorWorldVertices = actors[iActor].vertexPositionsWorld();
@@ -80,4 +94,6 @@ void CollisionSim::State::copyAllToDeviceAsync() const {
     force.copyToDevice();
     torque.copyToDevice();
     wallCollisions.copyToDevice();
+    addLinearVelocity.copyToDevice();
+    addAngularVelocity.copyToDevice();
 }

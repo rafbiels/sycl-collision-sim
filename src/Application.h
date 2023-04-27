@@ -26,7 +26,10 @@ namespace CollisionSim {
 class Application final : public Magnum::Platform::Application {
     public:
         explicit Application(const Arguments& arguments);
-        virtual ~Application() {m_computeTask.stop();}
+        virtual ~Application() {
+            m_computeTask.stop();
+            m_state.reset(); // Free device memory while m_queue is still alive
+        }
 
     private:
         void tickEvent() override;

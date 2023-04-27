@@ -38,19 +38,15 @@ struct USMData {
     USMData& operator=(const USMData&) = delete;
     USMData& operator=(USMData&&) = delete;
     sycl::event copyToDevice() const {
-        Corrade::Utility::Debug{} << "Enqueuing h2d copy from " << hostContainer.data() << " to " << devicePointer << "(" << hostContainer.size() << " elements)";
         return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size());
     }
     sycl::event copyToDevice(sycl::event depEvent) const {
-        Corrade::Utility::Debug{} << "Enqueuing h2d copy from " << hostContainer.data() << " to " << devicePointer << "(" << hostContainer.size() << " elements)";
         return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size(), depEvent);
     }
     sycl::event copyToHost() {
-        Corrade::Utility::Debug{} << "Enqueuing d2h copy from " << devicePointer << " to " << hostContainer.data() << "(" << hostContainer.size() << " elements)";
         return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size());
     }
     sycl::event copyToHost(sycl::event depEvent) {
-        Corrade::Utility::Debug{} << "Enqueuing d2h copy from " << devicePointer << " to " << hostContainer.data() << "(" << hostContainer.size() << " elements)";
         return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size(), depEvent);
     }
 
@@ -91,11 +87,17 @@ class State {
         size_t numActors{0};
         size_t numAllVertices{0};
 
+        /// Constants
+        ///@{
         USMData<float> worldBoundaries;
         USMData<uint16_t> actorIndices; // Caution: restricting numActors to 65536
         USMData<float> mass;
         USMData<float3x3> bodyInertiaInv;
         std::array<USMData<float>,3> bodyVertices;
+        ///@}
+
+        /// Motion simulation variables
+        ///@{
         std::array<USMData<float>,3> worldVertices;
         USMData<sycl::float3> translation;
         USMData<float3x3> rotation;
@@ -106,7 +108,14 @@ class State {
         USMData<sycl::float3> angularMomentum;
         USMData<sycl::float3> force;
         USMData<sycl::float3> torque;
+        ///@}
+
+        /// Collision simulation variables
+        ///@{
         USMData<Wall> wallCollisions;
+        USMData<sycl::float3> addLinearVelocity; /// Per-vertex collision response
+        USMData<sycl::float3> addAngularVelocity; /// Per-vertex collision response
+        ///@}
 };
 } // namespace CollisionSim
 
