@@ -80,6 +80,7 @@ CollisionSim::Actor::Actor(Magnum::Trade::MeshData&& meshData)
 
     Magnum::Matrix3 bodyInertia = Magnum::Matrix3{Magnum::Math::IdentityInit, m_covariance.trace()} - m_covariance;
     m_bodyInertiaInv = bodyInertia.inverted();
+    m_inertiaInv = m_bodyInertiaInv;
 }
 
 // -----------------------------------------------------------------------------

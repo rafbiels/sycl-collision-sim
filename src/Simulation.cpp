@@ -158,7 +158,7 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
     // Copy inputs from Actor objects to serial state data
     for (size_t iActor{0}; iActor<state->numActors; ++iActor) {
         state->linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
-        state->angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
+        state->angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].angularVelocity());
         state->force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
         state->torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
     }
@@ -289,17 +289,13 @@ void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actor
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
     }
 
-
     // Reset force and torque, and transfer serial state data to Actor objects
     for (size_t iActor{0}; iActor<state->numActors; ++iActor) {
         actors[iActor].force({0, 0, 0});
         actors[iActor].torque({0, 0, 0});
         actors[iActor].transformation(Util::transformationMatrix(state->translation.hostContainer[iActor], state->rotation.hostContainer[iActor]));
-        actors[iActor].inertiaInv(Util::toMagnum(state->inertiaInv.hostContainer[iActor]));
         actors[iActor].linearVelocity(Util::toMagnum(state->linearVelocity.hostContainer[iActor]));
         actors[iActor].angularVelocity(Util::toMagnum(state->angularVelocity.hostContainer[iActor]));
-        actors[iActor].linearMomentum( actors[iActor].mass() * actors[iActor].linearVelocity());
-        actors[iActor].angularMomentum( actors[iActor].inertiaInv().inverted() * actors[iActor].angularVelocity());
         // Fix floating point loss of orthogonality in the rotation matrix
         Util::orthonormaliseRotation(actors[iActor].transformation());
     }
