@@ -9,10 +9,10 @@
 #include <algorithm>
 
 // -----------------------------------------------------------------------------
-CollisionSim::State::State(const Magnum::Range3D& worldBounds,
-                           const std::vector<Actor>& actors,
-                           size_t numAllVertices,
-                           sycl::queue* queue)
+CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
+                                           const std::vector<Actor>& actors,
+                                           size_t numAllVertices,
+                                           sycl::queue* queue)
 : numActors{actors.size()},
   numAllVertices{numAllVertices},
   worldBoundaries{6, queue},
@@ -66,7 +66,7 @@ CollisionSim::State::State(const Magnum::Range3D& worldBounds,
 }
 
 // -----------------------------------------------------------------------------
-void CollisionSim::State::copyAllToDeviceAsync() const {
+void CollisionSim::ParallelState::copyAllToDeviceAsync() const {
     worldBoundaries.copyToDevice();
     actorIndices.copyToDevice();
     mass.copyToDevice();
@@ -87,3 +87,7 @@ void CollisionSim::State::copyAllToDeviceAsync() const {
     addLinearVelocity.copyToDevice();
     addAngularVelocity.copyToDevice();
 }
+
+// -----------------------------------------------------------------------------
+CollisionSim::SequentialState::SequentialState(const Magnum::Range3D& worldBounds)
+: worldBoundaries(worldBounds) {}

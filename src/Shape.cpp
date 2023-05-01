@@ -6,6 +6,7 @@
 
 #include "Shape.h"
 #include <Magnum/MeshTools/Compile.h>
+#include <limits>
 
 // -----------------------------------------------------------------------------
 CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
@@ -80,41 +81,25 @@ std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorld_nonc
 }
 
 // -----------------------------------------------------------------------------
-Magnum::Range3D CollisionSim::Shape::axisAlignedBoundingBox() {
-    Magnum::Range3D box{
-        {m_vertexPositionsWorld[0][0], m_vertexPositionsWorld[1][0],m_vertexPositionsWorld[2][0]},
-        {m_vertexPositionsWorld[0][0], m_vertexPositionsWorld[1][0],m_vertexPositionsWorld[2][0]}
-    };
-    for (size_t iVertex{1}; iVertex<m_vertexPositionsWorld[0].size(); ++iVertex) {
-        for (size_t axis{0}; axis<3; ++axis) {
-            if (m_vertexPositionsWorld[axis][iVertex] < box.min()[axis]) {
-                box.min()[axis] = m_vertexPositionsWorld[axis][iVertex];
-            }
-            if (m_vertexPositionsWorld[axis][iVertex] > box.max()[axis]) {
-                box.max()[axis] = m_vertexPositionsWorld[axis][iVertex];
-            }
-        }
-    }
-    return box;
+const Magnum::Range3D& CollisionSim::Shape::axisAlignedBoundingBox() const {
+    return m_aabb;
 }
 
 // -----------------------------------------------------------------------------
 void CollisionSim::Shape::updateVertexPositions() {
+    m_aabb = {
+        Magnum::Vector3{std::numeric_limits<float>::max()},
+        Magnum::Vector3{std::numeric_limits<float>::min()}
+    };
     for (size_t iVertex{0}; iVertex<m_vertexPositions[0].size(); ++iVertex) {
-        m_vertexPositionsWorld[0][iVertex] =
-            m_transformation[0][0]*m_vertexPositions[0][iVertex] +
-            m_transformation[1][0]*m_vertexPositions[1][iVertex] +
-            m_transformation[2][0]*m_vertexPositions[2][iVertex] +
-            m_transformation[3][0];
-        m_vertexPositionsWorld[1][iVertex] =
-            m_transformation[0][1]*m_vertexPositions[0][iVertex] +
-            m_transformation[1][1]*m_vertexPositions[1][iVertex] +
-            m_transformation[2][1]*m_vertexPositions[2][iVertex] +
-            m_transformation[3][1];
-        m_vertexPositionsWorld[2][iVertex] =
-            m_transformation[0][2]*m_vertexPositions[0][iVertex] +
-            m_transformation[1][2]*m_vertexPositions[1][iVertex] +
-            m_transformation[2][2]*m_vertexPositions[2][iVertex] +
-            m_transformation[3][2];
+        for (size_t axis{0}; axis<3; ++axis) {
+            m_vertexPositionsWorld[axis][iVertex] =
+                m_transformation[0][axis]*m_vertexPositions[0][iVertex] +
+                m_transformation[1][axis]*m_vertexPositions[1][iVertex] +
+                m_transformation[2][axis]*m_vertexPositions[2][iVertex] +
+                m_transformation[3][axis];
+            m_aabb.min()[axis] = std::min(m_aabb.min()[axis], m_vertexPositionsWorld[axis][iVertex]);
+            m_aabb.max()[axis] = std::max(m_aabb.max()[axis], m_vertexPositionsWorld[axis][iVertex]);
+        }
     }
 }

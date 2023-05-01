@@ -11,6 +11,7 @@
 #include <sycl/sycl.hpp>
 #include <limits>
 #include <numeric>
+#include <unordered_set>
 
 class actor_kernel;
 class vertex_kernel;
@@ -143,18 +144,57 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
 }
 
 // -----------------------------------------------------------------------------
-void simulateSequential(float dtime, std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries) {
+void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) {
+    // ===========================================
+    // Sweep and prune algorithm. References:
+    // [1] D.J. Tracy, S.R. Buss, B.M. Woods,
+    // Efficient Large-Scale Sweep and Prune Methods with AABB Insertion and Removal, 2009
+    // https://mathweb.ucsd.edu/~sbuss/ResearchWeb/EnhancedSweepPrune/SAP_paper_online.pdf
+    // [2] J.D. Cohen, M.C. Lin, D. Manocha, and M.K. Ponamgi,
+    // I-COLLIDE: An interactive and exact collision detection system for
+    // large-scale environments, 1995
+    // https://www.cs.jhu.edu/~cohen/Publications/icollide.pdf
+    // ===========================================
+    auto cmp = [&actors](unsigned int axis, size_t indexA, size_t indexB){
+        if (axis<3) {
+            return actors[indexA].axisAlignedBoundingBox().min()[axis]
+                < actors[indexB].axisAlignedBoundingBox().min()[axis];
+        }
+        return actors[indexA].axisAlignedBoundingBox().max()[axis-3]
+            < actors[indexB].axisAlignedBoundingBox().max()[axis-3];
+    };
+
+    std::array<std::unordered_set<size_t>,3> current{};
+    for (size_t i{1}; i<Constants::NumActors; ++i) {
+        for (unsigned int axis{0}; axis<6; ++axis) {
+            auto& indices{state->sortedActorIndices[axis]};
+            if (axis<3) {current[axis].insert(indices[i]);}
+            else {current[axis-3].erase(indices[i]);}
+            Corrade::Utility::Debug{} << "Axis " << axis << " current: " << current[axis%3];
+            for (size_t j{i}; j>0 && cmp(axis, indices[j], indices[j-1]); --j) {
+                std::swap(indices[j], indices[j-1]);
+            }
+        }
+    }
+    for (unsigned int axis{0}; axis<state->sortedActorIndices.size(); ++axis) {
+        Corrade::Utility::Debug{} << "Axis " << axis << " order: " << state->sortedActorIndices[axis];
+    }
+}
+
+// -----------------------------------------------------------------------------
+void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState* state) {
     for (Actor& actor : actors) {
         // Fix floating point loss of orthogonality in the rotation matrix
         Util::orthonormaliseRotation(actor.transformation());
     }
     simulateMotionSequential(dtime, actors);
-    collideWorldSequential(actors, worldBoundaries);
+    collideWorldSequential(actors, state->worldBoundaries);
+    collideBroadSequential(actors, state);
 }
 
 // -----------------------------------------------------------------------------
-void simulateParallel(float dtime, sycl::queue* queue, std::vector<Actor>& actors, State* state) {
-    using float3x3 = CollisionSim::State::float3x3;
+void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* state, sycl::queue* queue) {
+    using float3x3 = CollisionSim::ParallelState::float3x3;
     // Copy inputs from Actor objects to serial state data
     for (size_t iActor{0}; iActor<state->numActors; ++iActor) {
         state->linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());

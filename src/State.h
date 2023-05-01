@@ -8,22 +8,17 @@
 #define COLLISION_SIM_STATE
 
 #include "Actor.h"
+#include "Constants.h"
+#include "Util.h"
 #include "Wall.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Range.h>
 #include <sycl/sycl.hpp>
 #include <vector>
 #include <array>
+#include <utility>
 
 namespace CollisionSim {
-
-enum class StateVariable : uint8_t {
-    ActorIndices=0, Mass, BodyInertiaInv, BodyVertexX, BodyVertexY, BodyVertexZ,
-    VertexX, VertexY, VertexZ, Translation, Rotation, InertiaInv,
-    LinearVelocity, AngularVelocity, LinearMomentum, AngularMomentum,
-    Force, Torque, WallCollisions, WorldBoundaries,
-    MAX
-};
 
 template<typename T>
 struct USMData {
@@ -56,29 +51,29 @@ struct USMData {
 };
 
 /**
- * Class representing the simulation state, with properties
- * of all actors formatted into contiguous arrays
+ * Class representing the simulation state for parallel simulation,
+ * with properties of all actors formatted into contiguous arrays
  */
-class State {
+class ParallelState {
     public:
         using float3x3 = std::array<sycl::float3,3>;
 
         /// Empty constructor
-        State() = delete;
+        ParallelState() = delete;
         /**
          * Constructor from a vector of actors
          */
-        State(const Magnum::Range3D& worldBoundaries,
-              const std::vector<Actor>& actors,
-              size_t numAllVertices,
-              sycl::queue* queue);
+        explicit ParallelState(const Magnum::Range3D& worldBounds,
+                               const std::vector<Actor>& actors,
+                               size_t numAllVertices,
+                               sycl::queue* queue);
 
         /// Copy and assignment explicitly deleted
         ///@{
-        State(const State&) = delete;
-        State(State&&) = delete;
-        State& operator=(const State&) = delete;
-        State& operator=(State&&) = delete;
+        ParallelState(const ParallelState&) = delete;
+        ParallelState(ParallelState&&) = delete;
+        ParallelState& operator=(const ParallelState&) = delete;
+        ParallelState& operator=(ParallelState&&) = delete;
         ///}
 
         /// Enqueue copy of all data to the device and return immediately
@@ -116,6 +111,37 @@ class State {
         USMData<sycl::float3> addAngularVelocity; /// Per-vertex collision response
         ///@}
 };
+
+/**
+ * Class holding static data for sequential simulation
+ */
+class SequentialState {
+    public:
+        SequentialState() = delete;
+        explicit SequentialState(const Magnum::Range3D& worldBounds);
+
+        /// Copy and assignment explicitly deleted
+        ///@{
+        SequentialState(const SequentialState&) = delete;
+        SequentialState(SequentialState&&) = delete;
+        SequentialState& operator=(const SequentialState&) = delete;
+        SequentialState& operator=(SequentialState&&) = delete;
+        ///}
+
+        /// State variables
+        ///@{
+        Magnum::Range3D worldBoundaries;
+        std::array<std::array<size_t, Constants::NumActors>,6> sortedActorIndices{
+            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // xmin
+            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // ymin
+            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // zmin
+            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // xmax
+            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // ymax
+            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // zmax
+        };
+        ///}
+};
+
 } // namespace CollisionSim
 
 #endif // COLLISION_SIM_STATE

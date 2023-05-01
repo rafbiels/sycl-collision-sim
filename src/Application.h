@@ -28,7 +28,7 @@ class Application final : public Magnum::Platform::Application {
         explicit Application(const Arguments& arguments);
         virtual ~Application() {
             m_computeTask.stop();
-            m_state.reset(); // Free device memory while m_queue is still alive
+            m_parallelState.reset(); // Free device memory while m_queue is still alive
         }
 
     private:
@@ -54,7 +54,8 @@ class Application final : public Magnum::Platform::Application {
         /// Constant count of all vertices calculated at initialisation
         size_t m_numAllVertices{0};
 
-        std::unique_ptr<State> m_state;
+        std::unique_ptr<SequentialState> m_sequentialState;
+        std::unique_ptr<ParallelState> m_parallelState;
         std::unique_ptr<sycl::queue> m_syclQueue;
 
         bool m_cpuOnly{false};

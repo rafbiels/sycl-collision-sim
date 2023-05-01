@@ -44,7 +44,7 @@ class Shape {
         std::array<std::vector<float>,3>& vertexPositionsWorld_nonconst();
 
         /// Return the bounding box in world coordinate system
-        Magnum::Range3D axisAlignedBoundingBox();
+        const Magnum::Range3D& axisAlignedBoundingBox() const;
 
         /// Recalculate m_vertexPositionsWorld
         void updateVertexPositions();
@@ -58,6 +58,8 @@ class Shape {
         std::array<std::vector<float>,3> m_vertexPositions{};
         /// SoA vertex data in world coordinate system
         std::array<std::vector<float>,3> m_vertexPositionsWorld{};
+        /// Axis-aligned bounding box recalculated together with m_vertexPositionsWorld
+        Magnum::Range3D m_aabb;
         /// Constant number of vertices, calculated at construction
         size_t m_numVertices{0};
 };

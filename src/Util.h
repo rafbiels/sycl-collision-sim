@@ -206,6 +206,12 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
     };
 }
 
+template <size_t... Indices>
+consteval std::array<size_t, sizeof...(Indices)>
+indexArray(std::index_sequence<Indices...>) {
+    return {Indices...};
+}
+
 } // namespace CollisionSim::Util
 
 #endif // COLLISION_SIM_UTIL

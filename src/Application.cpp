@@ -48,16 +48,16 @@ m_syclQueue{nullptr}
 
     createActors();
 
-    if (!m_cpuOnly) {
+    if (m_cpuOnly) {
+        m_sequentialState = std::make_unique<SequentialState>(m_world.boundaries());
+    } else {
         try {
             m_syclQueue = std::make_unique<sycl::queue>(sycl::gpu_selector_v, sycl::property::queue::in_order{});
-            m_state = std::make_unique<State>(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.get());
+            m_parallelState = std::make_unique<ParallelState>(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.get());
             Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
             // Copy initial data to the device
-            m_state->copyAllToDeviceAsync();
+            m_parallelState->copyAllToDeviceAsync();
             m_syclQueue->wait_and_throw();
-            // // Kernel warm-up
-            // Simulation::collideWorldParallel(m_syclQueue.get(), m_actors, m_state.get());
         } catch (const std::exception& ex) {
             Corrade::Utility::Error{} << "Exception caught: " << ex.what();
         }
@@ -164,9 +164,9 @@ void CollisionSim::Application::compute() {
 
     // Compute collisions and rigid body motion
     if (m_cpuOnly) {
-        Simulation::simulateSequential(simDeltaTime, m_actors, m_world.boundaries());
+        Simulation::simulateSequential(simDeltaTime, m_actors, m_sequentialState.get());
     } else {
-        Simulation::simulateParallel(simDeltaTime, m_syclQueue.get(), m_actors, m_state.get());
+        Simulation::simulateParallel(simDeltaTime, m_actors, m_parallelState.get(), m_syclQueue.get());
     }
 }
 
@@ -186,7 +186,7 @@ void CollisionSim::Application::createActors() {
     const float zmax{m_world.boundaries().max().z()};
     const float xrange{xmax-xmin};
     const float zrange{zmax-zmin};
-    const size_t gridSideN{5};
+    const size_t gridSideN{Constants::SqrtNumActors};
     const float dx{xrange/(gridSideN)};
     const float dz{zrange/(gridSideN)};
     auto generator = [](size_t index){
