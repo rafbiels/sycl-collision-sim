@@ -52,7 +52,6 @@ struct USMData {
 
 struct Edge {
     uint16_t actorIndex{std::numeric_limits<uint16_t>::max()};
-    uint16_t padding{0}; // keeping isEnd on a different cache line is much faster
     bool isEnd{false};
 };
 
