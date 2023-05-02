@@ -50,6 +50,20 @@ struct USMData {
     T* devicePointer; // owning pointer
 };
 
+struct Edge {
+    uint16_t actorIndex{std::numeric_limits<uint16_t>::max()};
+    bool isEnd{false};
+};
+
+template <size_t... Indices>
+constexpr std::array<Edge, 2*sizeof...(Indices)> edgeArray(std::index_sequence<Indices...>) {
+    return {{(Edge{Indices, false})..., (Edge{Indices, true})...}};
+}
+
+inline Corrade::Utility::Debug& operator<<(Corrade::Utility::Debug& s, Edge e) {
+    return s << std::to_string(e.actorIndex).append(1, e.isEnd ? 'e' : 's').c_str();
+}
+
 /**
  * Class representing the simulation state for parallel simulation,
  * with properties of all actors formatted into contiguous arrays
@@ -131,13 +145,10 @@ class SequentialState {
         /// State variables
         ///@{
         Magnum::Range3D worldBoundaries;
-        std::array<std::array<size_t, Constants::NumActors>,6> sortedActorIndices{
-            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // xmin
-            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // ymin
-            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // zmin
-            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // xmax
-            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // ymax
-            Util::indexArray(std::make_index_sequence<Constants::NumActors>{}), // zmax
+        std::array<std::array<Edge, 2*Constants::NumActors>,3> sortedAABBEdges{
+            edgeArray(std::make_index_sequence<Constants::NumActors>{}), // x
+            edgeArray(std::make_index_sequence<Constants::NumActors>{}), // y
+            edgeArray(std::make_index_sequence<Constants::NumActors>{}), // z
         };
         ///}
 };

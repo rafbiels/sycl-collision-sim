@@ -144,7 +144,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
 }
 
 // -----------------------------------------------------------------------------
-void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) {
+Util::OverlapSet collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) {
     // ===========================================
     // Sweep and prune algorithm. References:
     // [1] D.J. Tracy, S.R. Buss, B.M. Woods,
@@ -155,30 +155,64 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
     // large-scale environments, 1995
     // https://www.cs.jhu.edu/~cohen/Publications/icollide.pdf
     // ===========================================
-    auto cmp = [&actors](unsigned int axis, size_t indexA, size_t indexB){
-        if (axis<3) {
-            return actors[indexA].axisAlignedBoundingBox().min()[axis]
-                < actors[indexB].axisAlignedBoundingBox().min()[axis];
-        }
-        return actors[indexA].axisAlignedBoundingBox().max()[axis-3]
-            < actors[indexB].axisAlignedBoundingBox().max()[axis-3];
+    auto cmp = [&actors](unsigned int axis, Edge edgeA, Edge edgeB){
+        const float a{
+            edgeA.isEnd ?
+            actors[edgeA.actorIndex].axisAlignedBoundingBox().max()[axis] :
+            actors[edgeA.actorIndex].axisAlignedBoundingBox().min()[axis]};
+        const float b{
+            edgeB.isEnd ?
+            actors[edgeB.actorIndex].axisAlignedBoundingBox().max()[axis] :
+            actors[edgeB.actorIndex].axisAlignedBoundingBox().min()[axis]};
+        return a<b;
     };
 
-    std::array<std::unordered_set<size_t>,3> current{};
-    for (size_t i{1}; i<Constants::NumActors; ++i) {
-        for (unsigned int axis{0}; axis<6; ++axis) {
-            auto& indices{state->sortedActorIndices[axis]};
-            if (axis<3) {current[axis].insert(indices[i]);}
-            else {current[axis-3].erase(indices[i]);}
-            Corrade::Utility::Debug{} << "Axis " << axis << " current: " << current[axis%3];
-            for (size_t j{i}; j>0 && cmp(axis, indices[j], indices[j-1]); --j) {
-                std::swap(indices[j], indices[j-1]);
+    for (unsigned int axis{0}; axis<3; ++axis) {
+        auto& edges{state->sortedAABBEdges[axis]};
+        // Insertion sort
+        for (size_t i{1}; i<2*Constants::NumActors; ++i) {
+            for (size_t j{i}; j>0 && cmp(axis, edges[j], edges[j-1]); --j) {
+                std::swap(edges[j], edges[j-1]);
             }
         }
     }
-    for (unsigned int axis{0}; axis<state->sortedActorIndices.size(); ++axis) {
-        Corrade::Utility::Debug{} << "Axis " << axis << " order: " << state->sortedActorIndices[axis];
+
+    // Second pass to determine overlaps
+    std::unordered_set<uint16_t> current;
+    std::array<Util::OverlapSet, 3> overlaps; // for each axis
+    Util::OverlapSet overlaps3D; // intersection of the 3 overlap sets
+    for (unsigned int axis{0}; axis<3; ++axis) {
+        auto& edges{state->sortedAABBEdges[axis]};
+        for (size_t i{1}; i<2*Constants::NumActors; ++i) {
+            Edge edge{edges[i]};
+            if (edge.isEnd) {
+                current.erase(edge.actorIndex);
+                for (uint16_t otherActorIndex : current) {
+                    overlaps[axis].insert(
+                        edge.actorIndex < otherActorIndex ?
+                        std::make_pair(edge.actorIndex, otherActorIndex) :
+                        std::make_pair(otherActorIndex, edge.actorIndex)
+                    );
+                }
+            } else {
+                current.insert(edge.actorIndex);
+            }
+        }
     }
+
+    // Find the intersection of overlaps across the 3 axes
+    for (const std::pair<uint16_t,uint16_t> overlap : overlaps[0]) {
+        if (overlaps[1].contains(overlap) && overlaps[2].contains(overlap)) {
+            overlaps3D.insert(overlap);
+            // Corrade::Utility::Debug{} << "AABB collision between actors "
+            //                           << overlap.first << " and " << overlap.second
+            //                           << " pos " << actors[overlap.first].axisAlignedBoundingBox()
+            //                           << " and " << actors[overlap.second].axisAlignedBoundingBox();
+        }
+    }
+    // Corrade::Utility::Debug{} << "Found " << overlaps3D.size() << " AABB collisions";
+
+    return overlaps3D;
 }
 
 // -----------------------------------------------------------------------------

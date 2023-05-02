@@ -89,7 +89,7 @@ const Magnum::Range3D& CollisionSim::Shape::axisAlignedBoundingBox() const {
 void CollisionSim::Shape::updateVertexPositions() {
     m_aabb = {
         Magnum::Vector3{std::numeric_limits<float>::max()},
-        Magnum::Vector3{std::numeric_limits<float>::min()}
+        Magnum::Vector3{std::numeric_limits<float>::lowest()}
     };
     for (size_t iVertex{0}; iVertex<m_vertexPositions[0].size(); ++iVertex) {
         for (size_t axis{0}; axis<3; ++axis) {

@@ -19,6 +19,8 @@
 #include <memory>
 #include <thread>
 #include <functional>
+#include <utility>
+#include <unordered_set>
 
 namespace CollisionSim::Util {
 
@@ -206,11 +208,12 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
     };
 }
 
-template <size_t... Indices>
-consteval std::array<size_t, sizeof...(Indices)>
-indexArray(std::index_sequence<Indices...>) {
-    return {Indices...};
-}
+struct ActorIndexPairHash {
+    size_t operator()(std::pair<uint16_t,uint16_t> p) const {
+        return (static_cast<size_t>(p.first) << 16) | static_cast<size_t>(p.second);
+    }
+};
+class OverlapSet : public std::unordered_set<std::pair<uint16_t,uint16_t>,ActorIndexPairHash> {};
 
 } // namespace CollisionSim::Util
 
