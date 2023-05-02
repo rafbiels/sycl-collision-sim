@@ -151,6 +151,7 @@ class SequentialState {
             edgeArray(std::make_index_sequence<Constants::NumActors>{}), // y
             edgeArray(std::make_index_sequence<Constants::NumActors>{}), // z
         };
+        Util::OverlapSet aabbOverlaps;
         ///}
 };
 

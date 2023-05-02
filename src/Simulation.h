@@ -18,7 +18,7 @@ namespace CollisionSim::Simulation {
 
 void simulateMotionSequential(float dtime, std::vector<Actor>& actors);
 void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries);
-Util::OverlapSet collideBroadSequential(std::vector<Actor>& actors, SequentialState* state);
+void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state);
 
 void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState* state);
 void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* state, sycl::queue* queue);

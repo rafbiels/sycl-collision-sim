@@ -144,16 +144,11 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
 }
 
 // -----------------------------------------------------------------------------
-Util::OverlapSet collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) {
+void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) {
     // ===========================================
-    // Sweep and prune algorithm. References:
-    // [1] D.J. Tracy, S.R. Buss, B.M. Woods,
+    // Sweep and prune algorithm as described in D.J. Tracy, S.R. Buss, B.M. Woods,
     // Efficient Large-Scale Sweep and Prune Methods with AABB Insertion and Removal, 2009
     // https://mathweb.ucsd.edu/~sbuss/ResearchWeb/EnhancedSweepPrune/SAP_paper_online.pdf
-    // [2] J.D. Cohen, M.C. Lin, D. Manocha, and M.K. Ponamgi,
-    // I-COLLIDE: An interactive and exact collision detection system for
-    // large-scale environments, 1995
-    // https://www.cs.jhu.edu/~cohen/Publications/icollide.pdf
     // ===========================================
     auto cmp = [&actors](unsigned int axis, Edge edgeA, Edge edgeB){
         const float a{
@@ -167,9 +162,9 @@ Util::OverlapSet collideBroadSequential(std::vector<Actor>& actors, SequentialSt
         return a<b;
     };
 
+    // Insertion sort
     for (unsigned int axis{0}; axis<3; ++axis) {
         auto& edges{state->sortedAABBEdges[axis]};
-        // Insertion sort
         for (size_t i{1}; i<2*Constants::NumActors; ++i) {
             for (size_t j{i}; j>0 && cmp(axis, edges[j], edges[j-1]); --j) {
                 std::swap(edges[j], edges[j-1]);
@@ -180,7 +175,6 @@ Util::OverlapSet collideBroadSequential(std::vector<Actor>& actors, SequentialSt
     // Second pass to determine overlaps
     std::unordered_set<uint16_t> current;
     std::array<Util::OverlapSet, 3> overlaps; // for each axis
-    Util::OverlapSet overlaps3D; // intersection of the 3 overlap sets
     for (unsigned int axis{0}; axis<3; ++axis) {
         auto& edges{state->sortedAABBEdges[axis]};
         for (size_t i{1}; i<2*Constants::NumActors; ++i) {
@@ -201,18 +195,12 @@ Util::OverlapSet collideBroadSequential(std::vector<Actor>& actors, SequentialSt
     }
 
     // Find the intersection of overlaps across the 3 axes
+    state->aabbOverlaps.clear();
     for (const std::pair<uint16_t,uint16_t> overlap : overlaps[0]) {
         if (overlaps[1].contains(overlap) && overlaps[2].contains(overlap)) {
-            overlaps3D.insert(overlap);
-            // Corrade::Utility::Debug{} << "AABB collision between actors "
-            //                           << overlap.first << " and " << overlap.second
-            //                           << " pos " << actors[overlap.first].axisAlignedBoundingBox()
-            //                           << " and " << actors[overlap.second].axisAlignedBoundingBox();
+            state->aabbOverlaps.insert(overlap);
         }
     }
-    // Corrade::Utility::Debug{} << "Found " << overlaps3D.size() << " AABB collisions";
-
-    return overlaps3D;
 }
 
 // -----------------------------------------------------------------------------
