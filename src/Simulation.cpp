@@ -204,6 +204,39 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
 }
 
 // -----------------------------------------------------------------------------
+void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state) {
+    // ===========================================
+    // Gilbert-Johnson-Keerthi algorithm, reference to be added
+    // ===========================================
+    Corrade::Utility::Debug{} << "collideNarrowSequential checking " << state->aabbOverlaps.size() << " actor pairs";
+    for (const auto [iActorA, iActorB] : state->aabbOverlaps) {
+        Corrade::Utility::Debug{} << "collideNarrowSequential checking actors " << iActorA << " and " << iActorB;
+        const auto minkSumAB = Util::minkowskiSum(actors[iActorA].vertexPositionsWorld(), actors[iActorB].vertexPositionsWorld());
+        sycl::float3 v{1.0f};
+        std::array<std::vector<float>, 3> setW;
+        bool collided{false};
+        while (v[0]!=0.0f || v[1]!=0.0f || v[2]!=0.0f) {
+            sycl::float3 w = Util::supportMapping(-1.0f*v, minkSumAB);
+            Corrade::Utility::Debug{}
+                << "v=" << Util::toMagnum(v)
+                << " w=" << Util::toMagnum(w)
+                << " dp=" << sycl::dot(v,w);
+            if (sycl::dot(v,w) > 0.0f) {
+                collided = true;
+                break;
+            }
+            setW[0].push_back(w[0]);
+            setW[1].push_back(w[1]);
+            setW[2].push_back(w[2]);
+            v = Util::pointNearestToOrigin(setW);
+        }
+        Corrade::Utility::Debug{}
+            << "Actors " << iActorA << " and " << iActorB
+            << " collide? " << (collided ? "YES" : "NO");
+    }
+}
+
+// -----------------------------------------------------------------------------
 void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState* state) {
     for (Actor& actor : actors) {
         // Fix floating point loss of orthogonality in the rotation matrix
@@ -212,6 +245,7 @@ void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState
     simulateMotionSequential(dtime, actors);
     collideWorldSequential(actors, state->worldBoundaries);
     collideBroadSequential(actors, state);
+    collideNarrowSequential(actors, state);
 }
 
 // -----------------------------------------------------------------------------

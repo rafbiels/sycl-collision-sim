@@ -90,6 +90,14 @@ class MovingAverage {
         size_t m_window{0};
 };
 
+struct ActorIndexPairHash {
+    size_t operator()(std::pair<uint16_t,uint16_t> p) const {
+        return (static_cast<size_t>(p.first) << 16) | static_cast<size_t>(p.second);
+    }
+};
+class OverlapSet : public std::unordered_set<std::pair<uint16_t,uint16_t>,ActorIndexPairHash> {};
+
+
 Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b);
 
 constexpr static float RoundingPrecision{1e6};
@@ -208,12 +216,58 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
     };
 }
 
-struct ActorIndexPairHash {
-    size_t operator()(std::pair<uint16_t,uint16_t> p) const {
-        return (static_cast<size_t>(p.first) << 16) | static_cast<size_t>(p.second);
+/// Minkowski sum of objects A and -B
+constexpr std::array<std::vector<float>,3> minkowskiSum(const std::array<std::vector<float>,3>& a, const std::array<std::vector<float>,3>& b) {
+    std::array<std::vector<float>,3> result{};
+    result[0].reserve(a[0].size()*b[0].size());
+    result[1].reserve(a[1].size()*b[1].size());
+    result[2].reserve(a[2].size()*b[2].size());
+    for (size_t i{0}; i<a[0].size(); ++i) {
+        for (size_t j{0}; j<a[0].size(); ++j) {
+            result[0].push_back(a[0][i] - b[0][j]);
+            result[1].push_back(a[1][i] - b[0][j]);
+            result[2].push_back(a[2][i] - b[0][j]);
+            if (std::abs(result[0].back()) > 1e6) {std::abort();}
+        }
     }
-};
-class OverlapSet : public std::unordered_set<std::pair<uint16_t,uint16_t>,ActorIndexPairHash> {};
+    return result;
+}
+
+/// Find the point nearest to the origin
+constexpr sycl::float3 pointNearestToOrigin(const std::array<std::vector<float>,3>& obj) {
+    float minDistanceSquared{std::numeric_limits<float>::max()};
+    sycl::float3 retval{};
+    for (size_t i{0}; i<obj[0].size(); ++i) {
+        sycl::float3 point{obj[0][i], obj[1][i], obj[2][i]};
+        float ds = sycl::dot(point, point);
+        if (ds < minDistanceSquared) {
+            retval = point;
+            minDistanceSquared = ds;
+        }
+    }
+    return retval;
+}
+
+/// Support mapping of a vector to a point of an object
+constexpr sycl::float3 supportMapping(const sycl::float3& v, const std::array<std::vector<float>,3>& obj) {
+    float maxDot{std::numeric_limits<float>::lowest()};
+    sycl::float3 retval{1.0f};
+    for (size_t i{0}; i<obj[0].size(); ++i) {
+        sycl::float3 point{obj[0][i], obj[1][i], obj[2][i]};
+        if (std::abs(point[0]) > 1e6) {std::abort();}
+        float dp = sycl::dot(v, point);
+        Corrade::Utility::Debug{}
+            << "supportMapping v=" << Util::toMagnum(v)
+            << " point=" << Util::toMagnum(point)
+            << " dp=" << dp
+            << " maxDot=" << maxDot;
+        if (dp > maxDot) {
+            retval = point;
+            maxDot = dp;
+        }
+    }
+    return retval;
+}
 
 } // namespace CollisionSim::Util
 
