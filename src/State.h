@@ -56,7 +56,7 @@ struct Edge {
 };
 
 template <size_t... Indices>
-constexpr std::array<Edge, 2*sizeof...(Indices)> edgeArray(std::index_sequence<Indices...>) {
+consteval std::array<Edge, 2*sizeof...(Indices)> edgeArray(std::index_sequence<Indices...>) {
     return {{(Edge{Indices, false})..., (Edge{Indices, true})...}};
 }
 
