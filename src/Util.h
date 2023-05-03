@@ -217,17 +217,18 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
 }
 
 /// Minkowski sum of objects A and -B
-constexpr std::array<std::vector<float>,3> minkowskiSum(const std::array<std::vector<float>,3>& a, const std::array<std::vector<float>,3>& b) {
+inline std::array<std::vector<float>,3> minkowskiSum(const std::array<std::vector<float>,3>& a, const std::array<std::vector<float>,3>& b) {
     std::array<std::vector<float>,3> result{};
-    result[0].reserve(a[0].size()*b[0].size());
-    result[1].reserve(a[1].size()*b[1].size());
-    result[2].reserve(a[2].size()*b[2].size());
-    for (size_t i{0}; i<a[0].size(); ++i) {
-        for (size_t j{0}; j<a[0].size(); ++j) {
+    const size_t sizeA{a[0].size()};
+    const size_t sizeB{b[0].size()};
+    result[0].reserve(sizeA*sizeB);
+    result[1].reserve(sizeA*sizeB);
+    result[2].reserve(sizeA*sizeB);
+    for (size_t i{0}; i<sizeA; ++i) {
+        for (size_t j{0}; j<sizeB; ++j) {
             result[0].push_back(a[0][i] - b[0][j]);
-            result[1].push_back(a[1][i] - b[0][j]);
-            result[2].push_back(a[2][i] - b[0][j]);
-            if (std::abs(result[0].back()) > 1e6) {std::abort();}
+            result[1].push_back(a[1][i] - b[1][j]);
+            result[2].push_back(a[2][i] - b[2][j]);
         }
     }
     return result;
@@ -254,13 +255,7 @@ constexpr sycl::float3 supportMapping(const sycl::float3& v, const std::array<st
     sycl::float3 retval{1.0f};
     for (size_t i{0}; i<obj[0].size(); ++i) {
         sycl::float3 point{obj[0][i], obj[1][i], obj[2][i]};
-        if (std::abs(point[0]) > 1e6) {std::abort();}
         float dp = sycl::dot(v, point);
-        Corrade::Utility::Debug{}
-            << "supportMapping v=" << Util::toMagnum(v)
-            << " point=" << Util::toMagnum(point)
-            << " dp=" << dp
-            << " maxDot=" << maxDot;
         if (dp > maxDot) {
             retval = point;
             maxDot = dp;

@@ -177,7 +177,7 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
     std::array<Util::OverlapSet, 3> overlaps; // for each axis
     for (unsigned int axis{0}; axis<3; ++axis) {
         auto& edges{state->sortedAABBEdges[axis]};
-        for (size_t i{1}; i<2*Constants::NumActors; ++i) {
+        for (size_t i{0}; i<2*Constants::NumActors; ++i) {
             Edge edge{edges[i]};
             if (edge.isEnd) {
                 current.erase(edge.actorIndex);
@@ -206,33 +206,36 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
 // -----------------------------------------------------------------------------
 void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state) {
     // ===========================================
-    // Gilbert-Johnson-Keerthi algorithm, reference to be added
+    // Incremental Separating Axis Gilbert-Johnson-Keerthi (ISA-GJK) algorithm
+    // based on G. van den Bergen 1999,
+    // A Fast and Robust GJK Implementation for Collision Detection of Convex Objects
+    // https://solid.sourceforge.net/jgt98convex.pdf
     // ===========================================
-    Corrade::Utility::Debug{} << "collideNarrowSequential checking " << state->aabbOverlaps.size() << " actor pairs";
     for (const auto [iActorA, iActorB] : state->aabbOverlaps) {
-        Corrade::Utility::Debug{} << "collideNarrowSequential checking actors " << iActorA << " and " << iActorB;
         const auto minkSumAB = Util::minkowskiSum(actors[iActorA].vertexPositionsWorld(), actors[iActorB].vertexPositionsWorld());
         sycl::float3 v{1.0f};
+        sycl::float3 previousW{1.0f};
         std::array<std::vector<float>, 3> setW;
-        bool collided{false};
-        while (v[0]!=0.0f || v[1]!=0.0f || v[2]!=0.0f) {
+        volatile bool collided{false};
+        constexpr static auto vecEqual = [](const sycl::float3& a, const sycl::float3& b) constexpr {
+            return a[0]==b[0] && a[1]==b[1] && a[2]==b[2];
+        };
+        while (!vecEqual(v,sycl::float3{0.0f})) {
             sycl::float3 w = Util::supportMapping(-1.0f*v, minkSumAB);
-            Corrade::Utility::Debug{}
-                << "v=" << Util::toMagnum(v)
-                << " w=" << Util::toMagnum(w)
-                << " dp=" << sycl::dot(v,w);
             if (sycl::dot(v,w) > 0.0f) {
                 collided = true;
+                previousW = w;
+                break;
+            } else if (vecEqual(w, previousW)) {
+                collided = sycl::dot(v,v) < 4.0f; // FIXME: arbitrary condition?
                 break;
             }
             setW[0].push_back(w[0]);
             setW[1].push_back(w[1]);
             setW[2].push_back(w[2]);
+            previousW = w;
             v = Util::pointNearestToOrigin(setW);
         }
-        Corrade::Utility::Debug{}
-            << "Actors " << iActorA << " and " << iActorB
-            << " collide? " << (collided ? "YES" : "NO");
     }
 }
 
