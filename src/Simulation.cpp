@@ -206,37 +206,68 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
 // -----------------------------------------------------------------------------
 void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state) {
     // ===========================================
-    // Incremental Separating Axis Gilbert-Johnson-Keerthi (ISA-GJK) algorithm
-    // based on G. van den Bergen 1999,
-    // A Fast and Robust GJK Implementation for Collision Detection of Convex Objects
-    // https://solid.sourceforge.net/jgt98convex.pdf
+    // Trivial algorithm finding the closest pair of vertices from two bodies
+    // and comparing against a fixed threshold
     // ===========================================
     for (const auto [iActorA, iActorB] : state->aabbOverlaps) {
-        const auto minkSumAB = Util::minkowskiSum(actors[iActorA].vertexPositionsWorld(), actors[iActorB].vertexPositionsWorld());
-        sycl::float3 v{1.0f};
-        sycl::float3 previousW{1.0f};
-        std::array<std::vector<float>, 3> setW;
-        volatile bool collided{false};
-        constexpr static auto vecEqual = [](const sycl::float3& a, const sycl::float3& b) constexpr {
-            return a[0]==b[0] && a[1]==b[1] && a[2]==b[2];
-        };
-        while (!vecEqual(v,sycl::float3{0.0f})) {
-            sycl::float3 w = Util::supportMapping(-1.0f*v, minkSumAB);
-            if (sycl::dot(v,w) > 0.0f) {
-                collided = true;
-                previousW = w;
-                break;
-            } else if (vecEqual(w, previousW)) {
-                collided = sycl::dot(v,v) < 4.0f; // FIXME: arbitrary condition?
-                break;
+        float minDistSq{std::numeric_limits<float>::max()};
+        std::pair<size_t,size_t> bestIndices{std::numeric_limits<size_t>::max(),std::numeric_limits<size_t>::max()};
+        const auto& verticesA{actors[iActorA].vertexPositionsWorld()};
+        const auto& verticesB{actors[iActorB].vertexPositionsWorld()};
+        for (size_t i{0}; i<verticesA[0].size(); ++i) {
+            for (size_t j{0}; j<verticesB[0].size(); ++j) {
+                size_t index = i * verticesB[0].size() + j;
+                float distSq = (verticesA[0][i]-verticesB[0][j]) * (verticesA[0][i]-verticesB[0][j]) +
+                               (verticesA[1][i]-verticesB[1][j]) * (verticesA[1][i]-verticesB[1][j]) +
+                               (verticesA[2][i]-verticesB[2][j]) * (verticesA[2][i]-verticesB[2][j]);
+                if (distSq < minDistSq) {
+                    minDistSq = distSq;
+                    bestIndices = {i,j};
+                }
             }
-            setW[0].push_back(w[0]);
-            setW[1].push_back(w[1]);
-            setW[2].push_back(w[2]);
-            previousW = w;
-            v = Util::pointNearestToOrigin(setW);
+        }
+        if (minDistSq < 0.01f) {
+            // Corrade::Utility::Debug{} << "Collision detected";
+            sycl::float3 collisionPoint = {
+               0.5*(verticesA[0][bestIndices.first]+verticesB[0][bestIndices.second]),
+               0.5*(verticesA[1][bestIndices.first]+verticesB[1][bestIndices.second]),
+               0.5*(verticesA[2][bestIndices.first]+verticesB[2][bestIndices.second])
+            };
+            impulseCollision(actors[iActorA], actors[iActorB], Util::toMagnum(collisionPoint));
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+void impulseCollision(Actor& a, Actor& b, Magnum::Vector3 point) {
+    // See "Impulse-based reaction model" in https://en.wikipedia.org/wiki/Collision_response
+    using Magnum::Math::cross;
+    using Magnum::Math::dot;
+    Magnum::Vector3 ra = point - a.transformation_const().translation();
+    Magnum::Vector3 rb = point - b.transformation_const().translation();
+    Magnum::Vector3 norm = (ra + rb).normalized(); // TODO: does this make sense?
+    Magnum::Vector3 vpa = a.linearVelocity() + cross(a.angularVelocity(), ra);
+    Magnum::Vector3 vpb = b.linearVelocity() + cross(b.angularVelocity(), rb);
+    Magnum::Vector3 vr = vpb - vpa;
+    Magnum::Vector3 ta = a.inertiaInv()*cross(ra,norm);
+    Magnum::Vector3 tb = b.inertiaInv()*cross(rb,norm);
+    float impulse =
+        (-1.0f - Constants::RestitutionCoefficient) *
+        dot(vr,norm) / (
+            1.0f/a.mass() +
+            1.0f/b.mass() +
+            dot(
+                 cross(ta, ra) +
+                 cross(tb, rb)
+                , norm
+            )
+        );
+    Magnum::Vector3 addLinVA = -1.0f * norm * impulse / a.mass();
+    Magnum::Vector3 addLinVB = norm * impulse / b.mass();
+    Magnum::Vector3 addAngVA = -1.0f * impulse * ta;
+    Magnum::Vector3 addAngVB = impulse * tb;
+    a.addVelocity(addLinVA, addAngVA);
+    b.addVelocity(addLinVB, addAngVB);
 }
 
 // -----------------------------------------------------------------------------
