@@ -205,6 +205,7 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
 
 // -----------------------------------------------------------------------------
 void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state) {
+    /*
     // ===========================================
     // Trivial algorithm finding the closest pair of vertices from two bodies
     // and comparing against a fixed threshold
@@ -236,11 +237,38 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
             impulseCollision(actors[iActorA], actors[iActorB], Util::toMagnum(collisionPoint));
         }
     }
+    */
+
+    // ===========================================
+    // Algorithm finding the closest vertex-triangle pair from two bodies
+    // and comparing against a fixed threshold
+    // ===========================================
+    for (const auto [iActorA, iActorB] : state->aabbOverlaps) {
+        const auto& verticesA{actors[iActorA].vertexPositionsWorld()};
+        const auto& verticesB{actors[iActorB].vertexPositionsWorld()};
+        const auto& indicesA{actors[iActorA].meshData().indicesAsArray()};
+        const auto& indicesB{actors[iActorB].meshData().indicesAsArray()};
+        size_t nTrianglesA{indicesA.size()/3};
+        size_t nTrianglesB{indicesB.size()/3};
+        for (size_t i{0}; i<verticesA[0].size(); ++i) {
+            for (size_t j{0}; j<nTrianglesB; ++j) {
+                sycl::float3 A{verticesB[0][indicesB[3*j]], verticesB[1][indicesB[3*j]], verticesB[2][indicesB[3*j]]};
+                sycl::float3 B{verticesB[0][indicesB[3*j+1]], verticesB[1][indicesB[3*j+1]], verticesB[2][indicesB[3*j+1]]};
+                sycl::float3 C{verticesB[0][indicesB[3*j+2]], verticesB[1][indicesB[3*j+2]], verticesB[2][indicesB[3*j+2]]};
+                sycl::float3 V{verticesA[0][i], verticesA[1][i], verticesA[2][i]};
+                std::array<sycl::float3,3> triangle{A, B, C};
+                sycl::float3 P = Util::closestPointOnTriangle(triangle, V);
+            }
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
 void impulseCollision(Actor& a, Actor& b, Magnum::Vector3 point) {
-    // See "Impulse-based reaction model" in https://en.wikipedia.org/wiki/Collision_response
+    // ===========================================
+    // See "Impulse-based reaction model" in
+    // https://en.wikipedia.org/wiki/Collision_response
+    // ===========================================
     using Magnum::Math::cross;
     using Magnum::Math::dot;
     Magnum::Vector3 ra = point - a.transformation_const().translation();
