@@ -250,16 +250,32 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
         const auto& indicesB{actors[iActorB].meshData().indicesAsArray()};
         size_t nTrianglesA{indicesA.size()/3};
         size_t nTrianglesB{indicesB.size()/3};
+        sycl::float3 bestVertex{0.0f, 0.0f, 0.0f};
+        sycl::float3 bestTrianglePoint{0.0f, 0.0f, 0.0f};
+        float smallestDistance{std::numeric_limits<float>::max()};
         for (size_t i{0}; i<verticesA[0].size(); ++i) {
             for (size_t j{0}; j<nTrianglesB; ++j) {
                 sycl::float3 A{verticesB[0][indicesB[3*j]], verticesB[1][indicesB[3*j]], verticesB[2][indicesB[3*j]]};
                 sycl::float3 B{verticesB[0][indicesB[3*j+1]], verticesB[1][indicesB[3*j+1]], verticesB[2][indicesB[3*j+1]]};
                 sycl::float3 C{verticesB[0][indicesB[3*j+2]], verticesB[1][indicesB[3*j+2]], verticesB[2][indicesB[3*j+2]]};
-                sycl::float3 V{verticesA[0][i], verticesA[1][i], verticesA[2][i]};
+
+                // Skip degenerate triangles
+                if (Util::equal(A,B) || Util::equal(B,C)) {continue;}
+
                 std::array<sycl::float3,3> triangle{A, B, C};
-                sycl::float3 P = Util::closestPointOnTriangle(triangle, V);
+                sycl::float3 V{verticesA[0][i], verticesA[1][i], verticesA[2][i]};
+                sycl::float4 Pd = Util::closestPointOnTriangle(triangle, V);
+                if (Pd[3] < smallestDistance) {
+                    smallestDistance = Pd[3];
+                    bestVertex = V;
+                    bestTrianglePoint = sycl::float3{Pd[0], Pd[1], Pd[2]};
+                }
             }
         }
+        Corrade::Utility::Debug{} << "Checking vertices of actor " << iActorA
+            << " against triangles of actor " << iActorB
+            << " found the closest points " << Util::toMagnum(bestVertex) << Util::toMagnum(bestTrianglePoint)
+            << ", d = " << smallestDistance;
     }
 }
 
