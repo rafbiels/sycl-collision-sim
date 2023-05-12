@@ -143,6 +143,11 @@ constexpr Magnum::Matrix4 transformationMatrix(const sycl::float3& translation,
 }
 ///@}
 
+/// SYCL float3 equality operation
+constexpr bool equal(const sycl::float3& a, const sycl::float3& b) {
+    return a[0]==b[0] && a[1]==b[1] && a[2]==b[2];
+}
+
 /// SYCL matrix-scalar multiplication
 constexpr std::array<sycl::float3,3> msmul(const std::array<sycl::float3,3>& mat, float scalar) {
     return {
@@ -217,7 +222,8 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
     };
 }
 
-inline sycl::float3 closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const sycl::float3& point) {
+/// @brief Returns the closest point P and distance d as {Px, Py, Pz, d} 
+inline sycl::float4 closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const sycl::float3& point) {
     // ===========================================
     // "2D Method" following M.W. Jones 1995
     // 3D Distance from a Point to a Triangle
@@ -236,8 +242,8 @@ inline sycl::float3 closestPointOnTriangle(const std::array<sycl::float3,3>& tri
 
     // Rotate the problem around x-axis such that B lies in the xz plane
     const float denomRotX = sycl::sqrt(B[1]*B[1]+B[2]*B[2]);
-    const float sinRotX = std::copysign(B[1] / denomRotX, B[2]);
-    const float cosRotX = std::copysign(B[2] / denomRotX, B[1]);
+    const float sinRotX = denomRotX==0 ? 0.0f : std::copysign(B[1] / denomRotX, B[2]);
+    const float cosRotX = denomRotX==0 ? 1.0f : std::copysign(B[2] / denomRotX, B[1]);
     const std::array<sycl::float3,3> rotX = {
         sycl::float3{1.0f, 0.0f, 0.0f},
         sycl::float3{0.0f, cosRotX, sinRotX},
@@ -258,8 +264,8 @@ inline sycl::float3 closestPointOnTriangle(const std::array<sycl::float3,3>& tri
 
     // Rotate the problem around y-axis such that B lies on the z-axis
     const float denomRotY = sycl::sqrt(B[0]*B[0]+B[2]*B[2]);
-    const float sinRotY = std::copysign(B[0] / denomRotY, B[2]);
-    const float cosRotY = std::copysign(B[2] / denomRotY, -B[0]);
+    const float sinRotY = denomRotY==0 ? 0.0f : std::copysign(B[0] / denomRotY, B[2]);
+    const float cosRotY = denomRotY==0 ? 1.0f : std::copysign(B[2] / denomRotY, -B[0]);
     const std::array<sycl::float3,3> rotY = {
         sycl::float3{cosRotY, 0.0f, -sinRotY},
         sycl::float3{0.0f, 1.0f, 0.0f},
@@ -278,8 +284,8 @@ inline sycl::float3 closestPointOnTriangle(const std::array<sycl::float3,3>& tri
 
     // Rotate the problem around z-axis such that C lies in the yz plane
     const float denomRotZ = sycl::sqrt(C[0]*C[0]+C[1]*C[1]);
-    const float sinRotZ = std::copysign(C[0] / denomRotZ, C[0]);
-    const float cosRotZ = std::copysign(C[1] / denomRotZ, -C[1]);
+    const float sinRotZ = denomRotZ==0 ? 0.0f : std::copysign(C[0] / denomRotZ, C[0]);
+    const float cosRotZ = denomRotZ==0 ? 1.0f : std::copysign(C[1] / denomRotZ, -C[1]);
     const std::array<sycl::float3,3> rotZ = {
         sycl::float3{cosRotZ, -sinRotZ, 0.0f},
         sycl::float3{sinRotZ, cosRotZ, 0.0f},
@@ -302,9 +308,9 @@ inline sycl::float3 closestPointOnTriangle(const std::array<sycl::float3,3>& tri
         return (checkPointY-linePointY)*lineDZ - (checkPointZ-linePointZ)*lineDY;
     };
 
-    const float edgeAB = edge(P[1], P[2], A[1], A[2], B[1]-A[1], B[2]-A[2]);
-    const float edgeBC = edge(P[1], P[2], B[1], B[2], C[1]-B[1], C[2]-B[2]);
-    const float edgeCA = edge(P[1], P[2], C[1], C[2], A[1]-C[1], A[2]-C[2]);
+    float edgeAB = edge(P[1], P[2], A[1], A[2], B[1]-A[1], B[2]-A[2]);
+    float edgeBC = edge(P[1], P[2], B[1], B[2], C[1]-B[1], C[2]-B[2]);
+    float edgeCA = edge(P[1], P[2], C[1], C[2], A[1]-C[1], A[2]-C[2]);
 
 
     Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> 2D problem: "
@@ -316,7 +322,133 @@ inline sycl::float3 closestPointOnTriangle(const std::array<sycl::float3,3>& tri
         << " edgeBC =" << edgeBC
         << " edgeCA =" << edgeCA;
 
-    return {};
+    float distance{std::numeric_limits<float>::lowest()};
+    sycl::float3 closestPoint{0.0f, 0.0f, 0.0f};
+    float clockwiseDet = -B[2]*C[1];
+    Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+        << "clockwiseDet = " << clockwiseDet;
+
+    if (clockwiseDet < 0) {
+        // translate clockwise problem into anti-clockwise
+        edgeAB = -edgeAB;
+        edgeBC = -edgeBC;
+        edgeCA = -edgeCA;
+    }
+
+    if (edgeAB <= 0 && edgeBC <= 0 && edgeCA <= 0) {
+        // - - -
+        // 2D point inside triangle
+        Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+            << "2D point inside triangle";
+        distance = sycl::abs(P[0]);
+        closestPoint = sycl::float3{0.0f, P[1], P[2]};
+    } else if (edgeAB >= 0) {
+        if (edgeCA >= 0) {
+            // + - + (edgeBC assumed -)
+            // 2D point closest to triangle vertex A
+            Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+                << "2D point closest to triangle vertex A";
+            if (edgeBC > 0) {throw std::runtime_error("edgeBA expected <= 0 but is > 0");}
+            distance = sycl::length(P);
+            closestPoint = A;
+        } else if (edgeBC >= 0) {
+            // + + -
+            // 2D point closest to triangle vertex B
+            Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+                << "2D point closest to triangle vertex B";
+            distance = sycl::sqrt(P[0]*P[0] + P[1]*P[1] + (P[2]-B[2])*(P[2]-B[2]));
+            closestPoint = B;
+        } else {
+            // + - -
+            // 2D point closest to triangle edge AB
+            Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+                << "2D point closest to triangle edge AB";
+            // AB lies on z-axis, so d(P, AB) is  d(P, z-axis)
+            const float distanceYZSquared = P[1]*P[1];
+            distance = sycl::sqrt(P[0]*P[0] + distanceYZSquared);
+            const float ADOverAB = sycl::sqrt(
+                ((P[1]-A[1])*(P[1]-A[1]) + (P[2]-A[2])*(P[2]-A[2]) - distanceYZSquared) /
+                ((B[1]-A[1])*(B[1]-A[1]) + (B[2]-A[2])*(B[2]-A[2]))
+            );
+            closestPoint = sycl::float3{
+                0.0f,
+                A[1] + (B[1]-A[1])*ADOverAB,
+                A[2] + (B[2]-A[2])*ADOverAB,
+            };
+        }
+    } else if (edgeBC >= 0) {
+        if (edgeCA >= 0) {
+            // - + +
+            // 2D point closest to triangle vertex C
+            Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+                << "2D point closest to triangle vertex C";
+            distance = sycl::sqrt(P[0]*P[0] + (P[1]-C[1])*(P[1]-C[1]) + (P[2]-C[2])*(P[2]-C[2]));
+            closestPoint = C;
+        } else {
+            // - + -
+            // 2D point closest to triangle edge BC
+            Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+                << "2D point closest to triangle edge BC";
+            const float BmPz = B[2]-P[2];
+            const float CmBz = C[2]-B[2];
+            const float distanceYZSquared = (C[1]*BmPz + P[1]*CmBz) * (C[1]*BmPz + P[1]*CmBz) / (C[1]*C[1] + CmBz*CmBz);
+            distance = sycl::sqrt(P[0]*P[0] + distanceYZSquared);
+            const float BDOverBC = sycl::sqrt(
+                ((P[1]-B[1])*(P[1]-B[1]) + (P[2]-B[2])*(P[2]-B[2]) - distanceYZSquared) /
+                ((C[1]-B[1])*(C[1]-B[1]) + (C[2]-B[2])*(C[2]-B[2]))
+            );
+            closestPoint = sycl::float3{
+                0.0f,
+                B[1] + (C[1]-B[1])*BDOverBC,
+                B[2] + (C[2]-B[2])*BDOverBC,
+            };
+        }
+    } else {
+        // - - + (edgeCA assumed +)
+        // 2D point closest to triangle edge CA
+        Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+            << "2D point closest to triangle edge CA";
+        if (edgeCA < 0) {throw std::runtime_error("edgeCA expected >= 0 but is < 0");}
+        const float distanceYZSquared = (C[2]*P[1]-C[1]*P[2]) * (C[2]*P[1]-C[1]*P[2]) / (C[1]*C[1]+C[2]*C[2]);
+        distance = sycl::sqrt(P[0]*P[0] + distanceYZSquared);
+        const float CDOverCA = sycl::sqrt(
+            ((P[1]-C[1])*(P[1]-C[1]) + (P[2]-C[2])*(P[2]-C[2]) - distanceYZSquared) /
+            ((A[1]-C[1])*(A[1]-C[1]) + (A[2]-C[2])*(A[2]-C[2]))
+        );
+        closestPoint = sycl::float3{
+            0.0f,
+            C[1] + (A[1]-C[1])*CDOverCA,
+            C[2] + (A[2]-C[2])*CDOverCA,
+        };
+    }
+
+    Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+        << "distance = " << distance
+        << ", closestPoint(transformed) = " << Util::toMagnum(closestPoint);
+
+    const std::array<sycl::float3,3> negRotX = {
+        sycl::float3{1.0f, 0.0f, 0.0f},
+        sycl::float3{0.0f, cosRotX, -sinRotX},
+        sycl::float3{0.0f, sinRotX, cosRotX}
+    };
+    const std::array<sycl::float3,3> negRotY = {
+        sycl::float3{cosRotY, 0.0f, sinRotY},
+        sycl::float3{0.0f, 1.0f, 0.0f},
+        sycl::float3{-sinRotY, 0.0f, cosRotY}
+    };
+    const std::array<sycl::float3,3> negRotZ = {
+        sycl::float3{cosRotZ, sinRotZ, 0.0f},
+        sycl::float3{-sinRotZ, cosRotZ, 0.0f},
+        sycl::float3{0.0f, 0.0f, 1.0f}
+    };
+
+    // Transform back to original coordinate system
+    closestPoint = Util::mvmul(negRotX, Util::mvmul(negRotY, Util::mvmul(negRotZ, closestPoint))) + triangle[0];
+
+    Corrade::Utility::Debug{} << "closestPointOnTriangle\n>>> "
+        << "closestPoint(real coords) = " << Util::toMagnum(closestPoint);
+
+    return sycl::float4{closestPoint[0], closestPoint[1], closestPoint[2], distance};
 }
 
 } // namespace CollisionSim::Util
