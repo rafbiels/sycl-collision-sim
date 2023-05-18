@@ -252,6 +252,8 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
         size_t nTrianglesB{indicesB.size()/3};
         sycl::float3 bestVertex{0.0f, 0.0f, 0.0f};
         sycl::float3 bestTrianglePoint{0.0f, 0.0f, 0.0f};
+        sycl::float3 bestTriangleNorm{0.0f, 0.0f, 0.0f};
+        bool bestTriangleFromA{false};
         float smallestDistance{std::numeric_limits<float>::max()};
         for (size_t i{0}; i<verticesA[0].size(); ++i) {
             for (size_t j{0}; j<nTrianglesB; ++j) {
@@ -269,18 +271,77 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
                     smallestDistance = Pd[3];
                     bestVertex = V;
                     bestTrianglePoint = sycl::float3{Pd[0], Pd[1], Pd[2]};
+                    bestTriangleNorm = sycl::cross(B-A, C-A);
+                    bestTriangleNorm /= sycl::length(bestTriangleNorm);
+                    if (sycl::dot(bestTriangleNorm, bestTrianglePoint - Util::toSycl(actors[iActorB].transformation_const().translation())) < 0) {
+                        bestTriangleNorm *= -1.0f;
+                    }
                 }
             }
         }
-        Corrade::Utility::Debug{} << "Checking vertices of actor " << iActorA
-            << " against triangles of actor " << iActorB
-            << " found the closest points " << Util::toMagnum(bestVertex) << Util::toMagnum(bestTrianglePoint)
-            << ", d = " << smallestDistance;
+        for (size_t i{0}; i<verticesB[0].size(); ++i) {
+            for (size_t j{0}; j<nTrianglesA; ++j) {
+                sycl::float3 A{verticesA[0][indicesA[3*j]], verticesA[1][indicesA[3*j]], verticesA[2][indicesA[3*j]]};
+                sycl::float3 B{verticesA[0][indicesA[3*j+1]], verticesA[1][indicesA[3*j+1]], verticesA[2][indicesA[3*j+1]]};
+                sycl::float3 C{verticesA[0][indicesA[3*j+2]], verticesA[1][indicesA[3*j+2]], verticesA[2][indicesA[3*j+2]]};
+
+                // Skip degenerate triangles
+                if (Util::equal(A,B) || Util::equal(B,C)) {continue;}
+
+                std::array<sycl::float3,3> triangle{A, B, C};
+                sycl::float3 V{verticesB[0][i], verticesB[1][i], verticesB[2][i]};
+                sycl::float4 Pd = Util::closestPointOnTriangle(triangle, V);
+                if (Pd[3] < smallestDistance) {
+                    smallestDistance = Pd[3];
+                    bestVertex = V;
+                    bestTrianglePoint = sycl::float3{Pd[0], Pd[1], Pd[2]};
+                    bestTriangleFromA = true;
+                    bestTriangleNorm = sycl::cross(B-A, C-A);
+                    bestTriangleNorm /= sycl::length(bestTriangleNorm);
+                    if (sycl::dot(bestTriangleNorm, bestTrianglePoint - Util::toSycl(actors[iActorA].transformation_const().translation())) < 0) {
+                        bestTriangleNorm *= -1.0f;
+                    }
+                }
+            }
+        }
+        // Corrade::Utility::Debug{} << "Checking vertices of actor " << iActorA
+        //     << " against triangles of actor " << iActorB
+        //     << " found the closest points " << Util::toMagnum(bestVertex) << Util::toMagnum(bestTrianglePoint)
+        //     << ", d = " << smallestDistance;
+        if (smallestDistance < 0.001) {
+            // Corrade::Utility::Debug{} << "Actors " << iActorA << " and " << iActorB << " collide";
+            Magnum::Vector3 collisionPoint = Util::toMagnum(0.5f*(bestVertex+bestTrianglePoint));
+            // Corrade::Utility::Debug{} << "normal = " << Util::toMagnum(bestTriangleNorm)
+            //     << ", |normal| = " << sycl::length(bestTriangleNorm);
+            if (bestTriangleFromA) {
+                impulseCollision(actors[iActorA], actors[iActorB], collisionPoint, Util::toMagnum(bestTriangleNorm));
+            } else {
+                impulseCollision(actors[iActorB], actors[iActorA], collisionPoint, Util::toMagnum(bestTriangleNorm));
+            }
+            // float x;
+            // std::cin >> x;
+            // Move the two actors away to avoid clipping and triggering
+            // the collision multiple times
+            const Magnum::Vector3 shiftA = smallestDistance * actors[iActorA].linearVelocity().normalized();
+            const Magnum::Vector3 shiftB = smallestDistance * actors[iActorB].linearVelocity().normalized();
+            actors[iActorA].transformation(actors[iActorA].transformation_const() + Magnum::Matrix4{
+                Magnum::Vector4{0.0f},
+                Magnum::Vector4{0.0f},
+                Magnum::Vector4{0.0f},
+                {shiftA[0], shiftA[1], shiftA[2], 0.0f}});
+            actors[iActorB].transformation(actors[iActorB].transformation_const() + Magnum::Matrix4{
+                Magnum::Vector4{0.0f},
+                Magnum::Vector4{0.0f},
+                Magnum::Vector4{0.0f},
+                {shiftB[0], shiftB[1], shiftB[2], 0.0f}});
+            actors[iActorA].updateVertexPositions();
+            actors[iActorB].updateVertexPositions();
+        }
     }
 }
 
 // -----------------------------------------------------------------------------
-void impulseCollision(Actor& a, Actor& b, Magnum::Vector3 point) {
+void impulseCollision(Actor& a, Actor& b, const Magnum::Vector3& point, const Magnum::Vector3& normal) {
     // ===========================================
     // See "Impulse-based reaction model" in
     // https://en.wikipedia.org/wiki/Collision_response
@@ -289,29 +350,42 @@ void impulseCollision(Actor& a, Actor& b, Magnum::Vector3 point) {
     using Magnum::Math::dot;
     Magnum::Vector3 ra = point - a.transformation_const().translation();
     Magnum::Vector3 rb = point - b.transformation_const().translation();
-    Magnum::Vector3 norm = (ra + rb).normalized(); // TODO: does this make sense?
     Magnum::Vector3 vpa = a.linearVelocity() + cross(a.angularVelocity(), ra);
     Magnum::Vector3 vpb = b.linearVelocity() + cross(b.angularVelocity(), rb);
     Magnum::Vector3 vr = vpb - vpa;
-    Magnum::Vector3 ta = a.inertiaInv()*cross(ra,norm);
-    Magnum::Vector3 tb = b.inertiaInv()*cross(rb,norm);
+    Magnum::Vector3 ta = a.inertiaInv()*cross(ra,normal);
+    Magnum::Vector3 tb = b.inertiaInv()*cross(rb,normal);
     float impulse =
         (-1.0f - Constants::RestitutionCoefficient) *
-        dot(vr,norm) / (
+        dot(vr,normal) / (
             1.0f/a.mass() +
             1.0f/b.mass() +
             dot(
                  cross(ta, ra) +
                  cross(tb, rb)
-                , norm
+                , normal
             )
         );
-    Magnum::Vector3 addLinVA = -1.0f * norm * impulse / a.mass();
-    Magnum::Vector3 addLinVB = norm * impulse / b.mass();
+    Magnum::Vector3 addLinVA = -1.0f * normal * impulse / a.mass();
+    Magnum::Vector3 addLinVB = normal * impulse / b.mass();
     Magnum::Vector3 addAngVA = -1.0f * impulse * ta;
     Magnum::Vector3 addAngVB = impulse * tb;
+    // Corrade::Utility::Debug{} << "impulseCollision before: vA = "
+    //     << a.linearVelocity()
+    //     << ", |vA| = " << a.linearVelocity().length()
+    //     << ", vB = " << b.linearVelocity()
+    //     << ", |vB| = " << b.linearVelocity().length();
+    // Corrade::Utility::Debug{} << "impulseCollision adding vA = " << addLinVA
+    //     << ", wA = " << addAngVA
+    //     << ", vB = " << addLinVB
+    //     << ", wB = " << addAngVB;
     a.addVelocity(addLinVA, addAngVA);
     b.addVelocity(addLinVB, addAngVB);
+    // Corrade::Utility::Debug{} << "impulseCollision after: vA = "
+    //     << a.linearVelocity()
+    //     << ", |vA| = " << a.linearVelocity().length()
+    //     << ", vB = " << b.linearVelocity()
+    //     << ", |vB| = " << b.linearVelocity().length();
 }
 
 // -----------------------------------------------------------------------------
