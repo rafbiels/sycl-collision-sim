@@ -27,6 +27,7 @@ m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
+m_computeFPSLongAvgSec{65536},
 m_computeTask{[this]{compute();}},
 m_syclQueue{nullptr}
 {
@@ -81,6 +82,13 @@ m_syclQueue{nullptr}
 }
 
 // -----------------------------------------------------------------------------
+CollisionSim::Application::~Application() {
+    m_computeTask.stop();
+    m_parallelState.reset(); // Free device memory while m_queue is still alive
+    Corrade::Utility::Debug{} << "Average compute FPS: " << m_computeFPSLongAvgSec.value();
+}
+
+// -----------------------------------------------------------------------------
 void CollisionSim::Application::tickEvent() {
     using namespace Magnum::Math::Literals;
     using FloatSecond = std::chrono::duration<float,std::ratio<1>>;
@@ -97,6 +105,7 @@ void CollisionSim::Application::tickEvent() {
             cfps = 1.0f/m_computeFrameTimeSec.value();
             m_computeFrameTimeSec.reset();
         }
+        m_computeFPSLongAvgSec.add(cfps);
         m_textRenderer.get("cfps").renderer().render(Corrade::Utility::formatString("Compute FPS: {:.1f}", cfps));
         m_textRenderer.get("rfps").renderer().render(Corrade::Utility::formatString("Render FPS: {:.1f}", 1.0/m_renderFrameTimeSec.value()));
         m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Time: {:.1f}s", wallTimeSec));

@@ -26,10 +26,7 @@ namespace CollisionSim {
 class Application final : public Magnum::Platform::Application {
     public:
         explicit Application(const Arguments& arguments);
-        virtual ~Application() {
-            m_computeTask.stop();
-            m_parallelState.reset(); // Free device memory while m_queue is still alive
-        }
+        virtual ~Application();
 
     private:
         void tickEvent() override;
@@ -50,6 +47,7 @@ class Application final : public Magnum::Platform::Application {
         TextRenderer m_textRenderer;
         Util::MovingAverage<float> m_renderFrameTimeSec;
         Util::MovingAverage<float> m_computeFrameTimeSec;
+        Util::MovingAverage<float> m_computeFPSLongAvgSec;
         std::mutex m_computeFrameTimeSecMutex;
         /// Constant count of all vertices calculated at initialisation
         size_t m_numAllVertices{0};
