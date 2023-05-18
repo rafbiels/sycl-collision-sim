@@ -205,40 +205,6 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
 
 // -----------------------------------------------------------------------------
 void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state) {
-    /*
-    // ===========================================
-    // Trivial algorithm finding the closest pair of vertices from two bodies
-    // and comparing against a fixed threshold
-    // ===========================================
-    for (const auto [iActorA, iActorB] : state->aabbOverlaps) {
-        float minDistSq{std::numeric_limits<float>::max()};
-        std::pair<size_t,size_t> bestIndices{std::numeric_limits<size_t>::max(),std::numeric_limits<size_t>::max()};
-        const auto& verticesA{actors[iActorA].vertexPositionsWorld()};
-        const auto& verticesB{actors[iActorB].vertexPositionsWorld()};
-        for (size_t i{0}; i<verticesA[0].size(); ++i) {
-            for (size_t j{0}; j<verticesB[0].size(); ++j) {
-                size_t index = i * verticesB[0].size() + j;
-                float distSq = (verticesA[0][i]-verticesB[0][j]) * (verticesA[0][i]-verticesB[0][j]) +
-                               (verticesA[1][i]-verticesB[1][j]) * (verticesA[1][i]-verticesB[1][j]) +
-                               (verticesA[2][i]-verticesB[2][j]) * (verticesA[2][i]-verticesB[2][j]);
-                if (distSq < minDistSq) {
-                    minDistSq = distSq;
-                    bestIndices = {i,j};
-                }
-            }
-        }
-        if (minDistSq < 0.01f) {
-            // Corrade::Utility::Debug{} << "Collision detected";
-            sycl::float3 collisionPoint = {
-               0.5*(verticesA[0][bestIndices.first]+verticesB[0][bestIndices.second]),
-               0.5*(verticesA[1][bestIndices.first]+verticesB[1][bestIndices.second]),
-               0.5*(verticesA[2][bestIndices.first]+verticesB[2][bestIndices.second])
-            };
-            impulseCollision(actors[iActorA], actors[iActorB], Util::toMagnum(collisionPoint));
-        }
-    }
-    */
-
     // ===========================================
     // Algorithm finding the closest vertex-triangle pair from two bodies
     // and comparing against a fixed threshold
@@ -298,22 +264,13 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
                 }
             }
         }
-        // Corrade::Utility::Debug{} << "Checking vertices of actor " << iActorA
-        //     << " against triangles of actor " << iActorB
-        //     << " found the closest points " << Util::toMagnum(bestVertex) << Util::toMagnum(bestTrianglePoint)
-        //     << ", d = " << smallestDistance;
         if (smallestDistance < 0.001) {
-            // Corrade::Utility::Debug{} << "Actors " << iActorA << " and " << iActorB << " collide";
             Magnum::Vector3 collisionPoint = Util::toMagnum(0.5f*(bestVertex+bestTrianglePoint));
-            // Corrade::Utility::Debug{} << "normal = " << Util::toMagnum(bestTriangleNorm)
-            //     << ", |normal| = " << sycl::length(bestTriangleNorm);
             if (bestTriangleFromA) {
                 impulseCollision(actors[iActorA], actors[iActorB], collisionPoint, Util::toMagnum(bestTriangleNorm));
             } else {
                 impulseCollision(actors[iActorB], actors[iActorA], collisionPoint, Util::toMagnum(bestTriangleNorm));
             }
-            // float x;
-            // std::cin >> x;
             // Move the two actors away to avoid clipping and triggering
             // the collision multiple times
             const Magnum::Vector3 shiftA = smallestDistance * actors[iActorA].linearVelocity().normalized();
@@ -364,22 +321,8 @@ void impulseCollision(Actor& a, Actor& b, const Magnum::Vector3& point, const Ma
     Magnum::Vector3 addLinVB = normal * impulse / b.mass();
     Magnum::Vector3 addAngVA = -1.0f * impulse * ta;
     Magnum::Vector3 addAngVB = impulse * tb;
-    // Corrade::Utility::Debug{} << "impulseCollision before: vA = "
-    //     << a.linearVelocity()
-    //     << ", |vA| = " << a.linearVelocity().length()
-    //     << ", vB = " << b.linearVelocity()
-    //     << ", |vB| = " << b.linearVelocity().length();
-    // Corrade::Utility::Debug{} << "impulseCollision adding vA = " << addLinVA
-    //     << ", wA = " << addAngVA
-    //     << ", vB = " << addLinVB
-    //     << ", wB = " << addAngVB;
     a.addVelocity(addLinVA, addAngVA);
     b.addVelocity(addLinVB, addAngVB);
-    // Corrade::Utility::Debug{} << "impulseCollision after: vA = "
-    //     << a.linearVelocity()
-    //     << ", |vA| = " << a.linearVelocity().length()
-    //     << ", vB = " << b.linearVelocity()
-    //     << ", |vB| = " << b.linearVelocity().length();
 }
 
 // -----------------------------------------------------------------------------
