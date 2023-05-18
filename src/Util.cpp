@@ -179,7 +179,7 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     B = mvmul(rotZ, B);
     C = mvmul(rotZ, C);
 
-    float smallestDistance{std::numeric_limits<float>::max()};
+    float smallestDistanceSquared{std::numeric_limits<float>::max()};
     sycl::float3 bestPointOnTriangle{0.0f, 0.0f, 0.0f};
     size_t bestVertexIndex{std::numeric_limits<size_t>::max()};
 
@@ -188,65 +188,51 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
         P -= triangle[0];
         P = mvmul(rotZ, mvmul(rotY, mvmul(rotX, P)));
 
-        auto edge = [](float checkPointY, float checkPointZ,
-                    float linePointY, float linePointZ,
-                    float lineDY, float lineDZ) constexpr -> float {
-            return (checkPointY-linePointY)*lineDZ - (checkPointZ-linePointZ)*lineDY;
-        };
+        const float forceAnticlockwise = (-B[2]*C[1] < 0) ? -1.0f : 1.0f;
+        const float edgeAB = forceAnticlockwise * P[1] * B[2];
+        const float edgeBC = forceAnticlockwise * (P[1]*(C[2]-B[2]) - C[1]*(P[2]-B[2]));
+        const float edgeCA = forceAnticlockwise * (C[1]*P[2] - C[2]*P[1]);
 
-        float edgeAB = edge(P[1], P[2], A[1], A[2], B[1]-A[1], B[2]-A[2]);
-        float edgeBC = edge(P[1], P[2], B[1], B[2], C[1]-B[1], C[2]-B[2]);
-        float edgeCA = edge(P[1], P[2], C[1], C[2], A[1]-C[1], A[2]-C[2]);
-
-        float distance{std::numeric_limits<float>::lowest()};
+        float distanceSquared{std::numeric_limits<float>::lowest()};
         sycl::float3 closestPoint{0.0f, 0.0f, 0.0f};
-        float clockwiseDet = -B[2]*C[1];
-
-        if (clockwiseDet < 0) {
-            // translate clockwise problem into anti-clockwise
-            edgeAB = -edgeAB;
-            edgeBC = -edgeBC;
-            edgeCA = -edgeCA;
-        }
 
         if (edgeAB <= 0 && edgeBC <= 0 && edgeCA <= 0) {
             // - - -
             // 2D point inside triangle
-            distance = sycl::abs(P[0]);
+            distanceSquared = P[0]*P[0];
             closestPoint = sycl::float3{0.0f, P[1], P[2]};
         } else if (edgeAB >= 0) {
             if (edgeCA >= 0) {
                 // + - + (edgeBC assumed -)
                 // 2D point closest to triangle vertex A
                 if (edgeBC > 0) {throw std::runtime_error("edgeBA expected <= 0 but is > 0");}
-                distance = sycl::length(P);
+                distanceSquared = P[0]*P[0]+P[1]*P[1]+P[2]*P[2];
                 closestPoint = A;
             } else if (edgeBC >= 0) {
                 // + + -
                 // 2D point closest to triangle vertex B
-                distance = sycl::sqrt(P[0]*P[0] + P[1]*P[1] + (P[2]-B[2])*(P[2]-B[2]));
+                distanceSquared = P[0]*P[0] + P[1]*P[1] + (P[2]-B[2])*(P[2]-B[2]);
                 closestPoint = B;
             } else {
                 // + - -
                 // 2D point closest to triangle edge AB
                 // AB lies on z-axis, so d(P, AB) is  d(P, z-axis)
                 const float distanceYZSquared = P[1]*P[1];
-                distance = sycl::sqrt(P[0]*P[0] + distanceYZSquared);
+                distanceSquared = P[0]*P[0] + distanceYZSquared;
                 const float ADOverAB = sycl::sqrt(
-                    ((P[1]-A[1])*(P[1]-A[1]) + (P[2]-A[2])*(P[2]-A[2]) - distanceYZSquared) /
-                    ((B[1]-A[1])*(B[1]-A[1]) + (B[2]-A[2])*(B[2]-A[2]))
+                    (P[1]*P[1] + P[2]*P[2] - distanceYZSquared) / (B[2]*B[2])
                 );
                 closestPoint = sycl::float3{
                     0.0f,
-                    A[1] + (B[1]-A[1])*ADOverAB,
-                    A[2] + (B[2]-A[2])*ADOverAB,
+                    0.0f,
+                    (B[2])*ADOverAB,
                 };
             }
         } else if (edgeBC >= 0) {
             if (edgeCA >= 0) {
                 // - + +
                 // 2D point closest to triangle vertex C
-                distance = sycl::sqrt(P[0]*P[0] + (P[1]-C[1])*(P[1]-C[1]) + (P[2]-C[2])*(P[2]-C[2]));
+                distanceSquared = P[0]*P[0] + (P[1]-C[1])*(P[1]-C[1]) + (P[2]-C[2])*(P[2]-C[2]);
                 closestPoint = C;
             } else {
                 // - + -
@@ -254,14 +240,14 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
                 const float BmPz = B[2]-P[2];
                 const float CmBz = C[2]-B[2];
                 const float distanceYZSquared = (C[1]*BmPz + P[1]*CmBz) * (C[1]*BmPz + P[1]*CmBz) / (C[1]*C[1] + CmBz*CmBz);
-                distance = sycl::sqrt(P[0]*P[0] + distanceYZSquared);
+                distanceSquared = P[0]*P[0] + distanceYZSquared;
                 const float BDOverBC = sycl::sqrt(
-                    ((P[1]-B[1])*(P[1]-B[1]) + (P[2]-B[2])*(P[2]-B[2]) - distanceYZSquared) /
-                    ((C[1]-B[1])*(C[1]-B[1]) + (C[2]-B[2])*(C[2]-B[2]))
+                    (P[1]*P[1] + (P[2]-B[2])*(P[2]-B[2]) - distanceYZSquared) /
+                    (C[1]*C[1] + (C[2]-B[2])*(C[2]-B[2]))
                 );
                 closestPoint = sycl::float3{
                     0.0f,
-                    B[1] + (C[1]-B[1])*BDOverBC,
+                    C[1]*BDOverBC,
                     B[2] + (C[2]-B[2])*BDOverBC,
                 };
             }
@@ -270,20 +256,20 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
             // 2D point closest to triangle edge CA
             if (edgeCA < 0) {throw std::runtime_error("edgeCA expected >= 0 but is < 0");}
             const float distanceYZSquared = (C[2]*P[1]-C[1]*P[2]) * (C[2]*P[1]-C[1]*P[2]) / (C[1]*C[1]+C[2]*C[2]);
-            distance = sycl::sqrt(P[0]*P[0] + distanceYZSquared);
+            distanceSquared = P[0]*P[0] + distanceYZSquared;
             const float CDOverCA = sycl::sqrt(
                 ((P[1]-C[1])*(P[1]-C[1]) + (P[2]-C[2])*(P[2]-C[2]) - distanceYZSquared) /
-                ((A[1]-C[1])*(A[1]-C[1]) + (A[2]-C[2])*(A[2]-C[2]))
+                (C[1]*C[1] + C[2]*C[2])
             );
             closestPoint = sycl::float3{
                 0.0f,
-                C[1] + (A[1]-C[1])*CDOverCA,
-                C[2] + (A[2]-C[2])*CDOverCA,
+                C[1] - C[1]*CDOverCA,
+                C[2] - C[2]*CDOverCA,
             };
         }
 
-        if (distance < smallestDistance) {
-            smallestDistance = distance;
+        if (distanceSquared < smallestDistanceSquared) {
+            smallestDistanceSquared = distanceSquared;
             bestPointOnTriangle = closestPoint;
             bestVertexIndex = iVertex;
         }
@@ -308,7 +294,7 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     // Transform back to original coordinate system
     bestPointOnTriangle = Util::mvmul(negRotX, Util::mvmul(negRotY, Util::mvmul(negRotZ, bestPointOnTriangle))) + triangle[0];
 
-    return {bestPointOnTriangle, smallestDistance, bestVertexIndex};
+    return {bestPointOnTriangle, smallestDistanceSquared, bestVertexIndex};
 }
 
 } // namespace CollisionSim::Util

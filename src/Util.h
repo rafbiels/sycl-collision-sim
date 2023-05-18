@@ -225,7 +225,7 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
 ///
 struct ClosestPointOnTriangleReturnValue {
     sycl::float3 bestPointOnTriangle{0.0f,0.0f,0.0f};
-    float distance{0.0f};
+    float distanceSquared{0.0f};
     size_t iVertex{0};
 };
 

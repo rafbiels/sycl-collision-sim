@@ -220,7 +220,7 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
         sycl::float3 bestTrianglePoint{0.0f, 0.0f, 0.0f};
         sycl::float3 bestTriangleNorm{0.0f, 0.0f, 0.0f};
         bool bestTriangleFromA{false};
-        float smallestDistance{std::numeric_limits<float>::max()};
+        float smallestDistanceSquared{std::numeric_limits<float>::max()};
         for (size_t j{0}; j<nTrianglesB; ++j) {
             sycl::float3 A{verticesB[0][indicesB[3*j]], verticesB[1][indicesB[3*j]], verticesB[2][indicesB[3*j]]};
             sycl::float3 B{verticesB[0][indicesB[3*j+1]], verticesB[1][indicesB[3*j+1]], verticesB[2][indicesB[3*j+1]]};
@@ -231,8 +231,8 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
 
             std::array<sycl::float3,3> triangle{A, B, C};
             const auto closest = Util::closestPointOnTriangle(triangle, verticesA);
-            if (closest.distance < smallestDistance) {
-                smallestDistance = closest.distance;
+            if (closest.distanceSquared < smallestDistanceSquared) {
+                smallestDistanceSquared = closest.distanceSquared;
                 bestVertex = sycl::float3{verticesA[0][closest.iVertex], verticesA[1][closest.iVertex], verticesA[2][closest.iVertex]};
                 bestTrianglePoint = closest.bestPointOnTriangle;
                 bestTriangleNorm = sycl::cross(B-A, C-A);
@@ -252,8 +252,8 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
 
             std::array<sycl::float3,3> triangle{A, B, C};
             const auto closest = Util::closestPointOnTriangle(triangle, verticesB);
-            if (closest.distance < smallestDistance) {
-                smallestDistance = closest.distance;
+            if (closest.distanceSquared < smallestDistanceSquared) {
+                smallestDistanceSquared = closest.distanceSquared;
                 bestVertex = sycl::float3{verticesB[0][closest.iVertex], verticesB[1][closest.iVertex], verticesB[2][closest.iVertex]};
                 bestTrianglePoint = closest.bestPointOnTriangle;
                 bestTriangleFromA = true;
@@ -264,7 +264,7 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
                 }
             }
         }
-        if (smallestDistance < 0.001) {
+        if (smallestDistanceSquared < 0.001*0.001) {
             Magnum::Vector3 collisionPoint = Util::toMagnum(0.5f*(bestVertex+bestTrianglePoint));
             if (bestTriangleFromA) {
                 impulseCollision(actors[iActorA], actors[iActorB], collisionPoint, Util::toMagnum(bestTriangleNorm));
@@ -273,6 +273,7 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state)
             }
             // Move the two actors away to avoid clipping and triggering
             // the collision multiple times
+            float smallestDistance = sycl::sqrt(smallestDistanceSquared);
             const Magnum::Vector3 shiftA = smallestDistance * actors[iActorA].linearVelocity().normalized();
             const Magnum::Vector3 shiftB = smallestDistance * actors[iActorB].linearVelocity().normalized();
             actors[iActorA].transformation(actors[iActorA].transformation_const() + Magnum::Matrix4{
