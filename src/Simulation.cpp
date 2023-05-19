@@ -386,6 +386,11 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             state->aabb[1].devicePointer,
             state->aabb[2].devicePointer
         };
+        std::array<Edge*,3> sortedAABBEdges {
+            state->sortedAABBEdges[0].devicePointer,
+            state->sortedAABBEdges[1].devicePointer,
+            state->sortedAABBEdges[2].devicePointer
+        };
 
         sycl::event actorKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
@@ -474,6 +479,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
+        // Calculate the axis-align bounding boxes for each actor
         sycl::event aabbKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(vertexKernelEvent);
             constexpr static size_t aabbWorkGroupSize{32};
@@ -492,17 +498,65 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
+        // Sort the AABB edges using bitonic sort, following:
+        // https://github.com/oneapi-src/oneAPI-samples/tree/master/DirectProgramming/C++SYCL/GraphTraversal/bitonic-sort
+        std::optional<sycl::event> aabbSortKernelEvent;
+        size_t numSteps = static_cast<size_t>(std::ceil(std::log2(2*Constants::NumActors)));
+        size_t gridSize{1ul << numSteps}; // 2**numSteps
+        for (size_t step{0}; step<numSteps; ++step) {
+            for (int stage=step; stage>=0; --stage) {
+                const size_t seq_len{1ul << (stage + 1ul)}; // 2**(stage+1)
+                const size_t two_power{1ul << (step - stage)}; // 2**(step-stage)
+                aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
+                    if (aabbSortKernelEvent.has_value()) {
+                        cgh.depends_on(aabbSortKernelEvent.value());
+                    }
+                    cgh.parallel_for<class aabb_sort_kernel>(gridSize, [=](sycl::id<1> id){
+                        auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
+                            return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
+                        };
+                        auto edgeLess = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
+                            return edgeValue(axis, edgeA) < edgeValue(axis, edgeB);
+                        };
+                        auto edgeGreater = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
+                            return edgeValue(axis, edgeA) > edgeValue(axis, edgeB);
+                        };
+
+                        if (id >= 2*Constants::NumActors) {return;}
+                        int seq_num = static_cast<int>(id / seq_len);
+                        int swapped_elem{-1};
+                        int h_len = static_cast<int>(seq_len / 2);
+                        if (id < (seq_len*seq_num) + h_len) {
+                            swapped_elem = id + h_len;
+                        }
+                        int odd = static_cast<int>(seq_num / two_power);
+                        bool increasing{(odd%2)==0};
+                        if (swapped_elem != -1) {
+                            if ((edgeGreater(0, sortedAABBEdges[0][id], sortedAABBEdges[0][swapped_elem]) && increasing) ||
+                                (edgeLess(0, sortedAABBEdges[0][id], sortedAABBEdges[0][swapped_elem]) && !increasing)) {
+                                std::swap(sortedAABBEdges[0][id], sortedAABBEdges[0][swapped_elem]);
+                            }
+                        }
+                    });
+                });
+            }
+        }
+
+        // TODO: clean up what needs to be copied and what it needs to wait for
         std::vector<sycl::event> d2hCopyEvents{
-            state->wallCollisions.copyToHost(aabbKernelEvent),
-            state->addLinearVelocity.copyToHost(aabbKernelEvent),
-            state->addAngularVelocity.copyToHost(aabbKernelEvent),
-            state->translation.copyToHost(aabbKernelEvent),
-            state->rotation.copyToHost(aabbKernelEvent),
-            state->linearVelocity.copyToHost(aabbKernelEvent),
-            state->angularVelocity.copyToHost(aabbKernelEvent),
-            state->aabb[0].copyToHost(aabbKernelEvent),
-            state->aabb[1].copyToHost(aabbKernelEvent),
-            state->aabb[2].copyToHost(aabbKernelEvent),
+            state->wallCollisions.copyToHost(aabbSortKernelEvent.value()),
+            state->addLinearVelocity.copyToHost(aabbSortKernelEvent.value()),
+            state->addAngularVelocity.copyToHost(aabbSortKernelEvent.value()),
+            state->translation.copyToHost(aabbSortKernelEvent.value()),
+            state->rotation.copyToHost(aabbSortKernelEvent.value()),
+            state->linearVelocity.copyToHost(aabbSortKernelEvent.value()),
+            state->angularVelocity.copyToHost(aabbSortKernelEvent.value()),
+            state->aabb[0].copyToHost(aabbSortKernelEvent.value()),
+            state->aabb[1].copyToHost(aabbSortKernelEvent.value()),
+            state->aabb[2].copyToHost(aabbSortKernelEvent.value()),
+            state->sortedAABBEdges[0].copyToHost(aabbSortKernelEvent.value()),
+            state->sortedAABBEdges[1].copyToHost(aabbSortKernelEvent.value()),
+            state->sortedAABBEdges[2].copyToHost(aabbSortKernelEvent.value()),
         };
         sycl::event::wait_and_throw(d2hCopyEvents);
     } catch (const std::exception& ex) {
