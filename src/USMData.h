@@ -38,11 +38,11 @@ template<typename T, size_t N=0>
 struct USMData {
     USMData() = delete;
     /// Dynamic size constructor
-    explicit USMData(size_t count, sycl::queue* q) requires USMDataConcepts::DynamicSize<N>
+    explicit USMData(sycl::queue* q, size_t count) requires USMDataConcepts::DynamicSize<N>
         : queue{q}, hostContainer(count), devicePointer{sycl::malloc_device<T>(count, *q)} {}
     /// Fixed size constructor
-    explicit USMData(sycl::queue* q) requires USMDataConcepts::FixedSize<N>
-        : queue{q}, devicePointer{sycl::malloc_device<T>(N, *q)} {}
+    explicit USMData(sycl::queue* q, std::array<T,N>&& values={}) requires USMDataConcepts::FixedSize<N>
+        : queue{q}, hostContainer{values}, devicePointer{sycl::malloc_device<T>(N, *q)} {}
     ~USMData() {
         sycl::free(devicePointer, *queue);
     }
@@ -69,6 +69,15 @@ struct USMData {
         return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*N, depEvent);
     }
 
+    /// Event vector dependent host-to-device memcpy; dynamic size version
+    sycl::event copyToDevice(const std::vector<sycl::event>& depEvents) const requires USMDataConcepts::DynamicSize<N> {
+        return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size(), depEvents);
+    }
+    /// Event vector dependent host-to-device memcpy; fixed size version
+    sycl::event copyToDevice(const std::vector<sycl::event>& depEvents) const requires USMDataConcepts::FixedSize<N> {
+        return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*N, depEvents);
+    }
+
     /// Immediate (no dependency) device-to-host memcpy; dynamic size version
     sycl::event copyToHost() requires USMDataConcepts::DynamicSize<N> {
         return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size());
@@ -87,8 +96,17 @@ struct USMData {
         return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*N, depEvent);
     }
 
+    /// Event vector dependent device-to-host memcpy; dynamic size version
+    sycl::event copyToHost(const std::vector<sycl::event>& depEvents) requires USMDataConcepts::DynamicSize<N> {
+        return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size(), depEvents);
+    }
+    /// Event vector dependent device-to-host memcpy; fixed size version
+    sycl::event copyToHost(const std::vector<sycl::event>& depEvents) requires USMDataConcepts::FixedSize<N> {
+        return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*N, depEvents);
+    }
+
     sycl::queue* queue; // non-owning pointer
-    std::conditional_t<USMDataConcepts::DynamicSize<N>, std::vector<T>, std::array<T,N>> hostContainer{};
+    std::conditional_t<USMDataConcepts::DynamicSize<N>, std::vector<T>, std::array<T,N>> hostContainer;
     T* devicePointer; // owning pointer
 };
 

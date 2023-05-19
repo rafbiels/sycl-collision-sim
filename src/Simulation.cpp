@@ -365,15 +365,27 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         sycl::float3* addAngularVelocity = state->addAngularVelocity.devicePointer;
         Wall* wallCollisions = state->wallCollisions.devicePointer;
         float3x3* bodyInertiaInv = state->bodyInertiaInv.devicePointer;
+        uint16_t* numVertices = state->numVertices.devicePointer;
+        uint32_t* verticesOffset = state->verticesOffset.devicePointer;
         std::array<float*,3> bodyVertices = {
             state->bodyVertices[0].devicePointer,
             state->bodyVertices[1].devicePointer,
             state->bodyVertices[2].devicePointer
         };
+        std::array<float*,3> worldVertices = {
+            state->worldVertices[0].devicePointer,
+            state->worldVertices[1].devicePointer,
+            state->worldVertices[2].devicePointer
+        };
         sycl::float3* angularVelocity = state->angularVelocity.devicePointer;
         float3x3* rotation = state->rotation.devicePointer;
         sycl::float3* force = state->force.devicePointer;
         sycl::float3* torque = state->torque.devicePointer;
+        std::array<sycl::float2*,3> aabb {
+            state->aabb[0].devicePointer,
+            state->aabb[1].devicePointer,
+            state->aabb[2].devicePointer
+        };
 
         sycl::event actorKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
@@ -418,20 +430,24 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             cgh.parallel_for<class vertex_kernel>(state->numAllVertices, [=](sycl::id<1> id){
                 uint16_t iActor = actorIndices[id];
 
-                sycl::float3 vertex{
+                // sycl::float3 vertex{
+                worldVertices[0][id] =
                     rotation[iActor][0][0]*bodyVertices[0][id] +
                     rotation[iActor][1][0]*bodyVertices[1][id] +
                     rotation[iActor][2][0]*bodyVertices[2][id] +
-                    translation[iActor][0],
+                    translation[iActor][0];
+                worldVertices[1][id] =
                     rotation[iActor][0][1]*bodyVertices[0][id] +
                     rotation[iActor][1][1]*bodyVertices[1][id] +
                     rotation[iActor][2][1]*bodyVertices[2][id] +
-                    translation[iActor][1],
+                    translation[iActor][1];
+                worldVertices[2][id] =
                     rotation[iActor][0][2]*bodyVertices[0][id] +
                     rotation[iActor][1][2]*bodyVertices[1][id] +
                     rotation[iActor][2][2]*bodyVertices[2][id] +
-                    translation[iActor][2]
-                };
+                    translation[iActor][2];
+                // };
+                sycl::float3 vertex{worldVertices[0][id], worldVertices[1][id], worldVertices[2][id]};
 
                 Wall collision{Wall::None};
                 collision |= (WallUnderlyingType{vertex[0] <= worldBoundaries[0]} << 0);
@@ -458,19 +474,46 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
+        sycl::event aabbKernelEvent = queue->submit([&](sycl::handler& cgh){
+            cgh.depends_on(vertexKernelEvent);
+            constexpr static size_t aabbWorkGroupSize{32};
+            const sycl::nd_range<1> aabbRange{Constants::NumActors*aabbWorkGroupSize,aabbWorkGroupSize};
+            cgh.parallel_for<class aabb_kernel>(aabbRange, [=](sycl::nd_item<1> it){
+                #pragma unroll
+                for (size_t axis{0}; axis<3; ++axis) {
+                    size_t iActor = it.get_group_linear_id();
+                    float* begin = worldVertices[axis] + verticesOffset[iActor];
+                    float* end = begin + numVertices[iActor];
+                    float min = sycl::joint_reduce(it.get_group(), begin, end, sycl::minimum{});
+                    float max = sycl::joint_reduce(it.get_group(), begin, end, sycl::maximum{});
+                    aabb[axis][iActor][0] = min;
+                    aabb[axis][iActor][1] = max;
+                }
+            });
+        });
+
         std::vector<sycl::event> d2hCopyEvents{
-            state->wallCollisions.copyToHost(vertexKernelEvent),
-            state->addLinearVelocity.copyToHost(vertexKernelEvent),
-            state->addAngularVelocity.copyToHost(vertexKernelEvent),
-            state->translation.copyToHost(vertexKernelEvent),
-            state->rotation.copyToHost(vertexKernelEvent),
-            state->linearVelocity.copyToHost(vertexKernelEvent),
-            state->angularVelocity.copyToHost(vertexKernelEvent)
+            state->wallCollisions.copyToHost(aabbKernelEvent),
+            state->addLinearVelocity.copyToHost(aabbKernelEvent),
+            state->addAngularVelocity.copyToHost(aabbKernelEvent),
+            state->translation.copyToHost(aabbKernelEvent),
+            state->rotation.copyToHost(aabbKernelEvent),
+            state->linearVelocity.copyToHost(aabbKernelEvent),
+            state->angularVelocity.copyToHost(aabbKernelEvent),
+            state->aabb[0].copyToHost(aabbKernelEvent),
+            state->aabb[1].copyToHost(aabbKernelEvent),
+            state->aabb[2].copyToHost(aabbKernelEvent),
         };
         sycl::event::wait_and_throw(d2hCopyEvents);
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
     }
+
+    // Corrade::Utility::Debug{} << "Actor 4 AABB:"
+    //     << "x=(" << state->aabb[0].hostContainer[4][0] << "," << state->aabb[0].hostContainer[4][1]
+    //     << "), y=(" << state->aabb[1].hostContainer[4][0] << "," << state->aabb[1].hostContainer[4][1]
+    //     << "), z=(" << state->aabb[2].hostContainer[4][0] << "," << state->aabb[2].hostContainer[4][1]
+    //     << ")";
 
     // Reset force and torque, and transfer serial state data to Actor objects
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {

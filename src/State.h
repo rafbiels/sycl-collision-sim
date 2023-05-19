@@ -69,14 +69,17 @@ class ParallelState {
         /// Constants
         ///@{
         USMData<float> worldBoundaries;
-        USMData<uint16_t> actorIndices; // Caution: restricting numActors to 65536
+        USMData<uint16_t> actorIndices; // Caution: restricting N actors to 65536
         USMData<float,Constants::NumActors> mass;
         USMData<float3x3,Constants::NumActors> bodyInertiaInv;
+        USMData<uint16_t,Constants::NumActors> numVertices; // Caution: restricting N vertices per actor to 65536
+        USMData<unsigned int,Constants::NumActors> verticesOffset;
         std::array<USMData<float>,3> bodyVertices;
         ///@}
 
         /// Motion simulation variables
         ///@{
+        std::array<USMData<float>,3> worldVertices;
         USMData<sycl::float3,Constants::NumActors> translation;
         USMData<float3x3,Constants::NumActors> rotation;
         USMData<float3x3,Constants::NumActors> inertiaInv;
@@ -93,6 +96,8 @@ class ParallelState {
         USMData<Wall> wallCollisions;
         USMData<sycl::float3> addLinearVelocity; /// Per-vertex collision response
         USMData<sycl::float3> addAngularVelocity; /// Per-vertex collision response
+        std::array<USMData<sycl::float2, Constants::NumActors>,3> aabb;
+        std::array<USMData<Edge, 2*Constants::NumActors>,3> sortedAABBEdges;
         ///@}
 };
 
