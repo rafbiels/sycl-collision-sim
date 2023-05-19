@@ -13,24 +13,23 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
                                            const std::vector<Actor>& actors,
                                            size_t numAllVertices,
                                            sycl::queue* queue)
-: numActors{actors.size()},
-  numAllVertices{numAllVertices},
+: numAllVertices{numAllVertices},
   worldBoundaries{6, queue},
   actorIndices{numAllVertices, queue},
-  mass{actors.size(), queue},
-  bodyInertiaInv{actors.size(), queue},
+  mass{queue},
+  bodyInertiaInv{queue},
   bodyVertices{USMData<float>{numAllVertices, queue},
                USMData<float>{numAllVertices, queue},
                USMData<float>{numAllVertices, queue}},
-  translation{actors.size(), queue},
-  rotation{actors.size(), queue},
-  inertiaInv{actors.size(), queue},
-  linearVelocity{actors.size(), queue},
-  angularVelocity{actors.size(), queue},
-  linearMomentum{actors.size(), queue},
-  angularMomentum{actors.size(), queue},
-  force{actors.size(), queue},
-  torque{actors.size(), queue},
+  translation{queue},
+  rotation{queue},
+  inertiaInv{queue},
+  linearVelocity{queue},
+  angularVelocity{queue},
+  linearMomentum{queue},
+  angularMomentum{queue},
+  force{queue},
+  torque{queue},
   wallCollisions{numAllVertices, queue},
   addLinearVelocity{numAllVertices, queue},
   addAngularVelocity{numAllVertices, queue} {
@@ -42,7 +41,7 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
     });
 
     size_t vertexOffset{0};
-    for (size_t iActor{0}; iActor<numActors; ++iActor) {
+    for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
         mass.hostContainer[iActor] = actors[iActor].mass();
         bodyInertiaInv.hostContainer[iActor] = Util::toSycl(actors[iActor].bodyInertiaInv());
         translation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().translation());

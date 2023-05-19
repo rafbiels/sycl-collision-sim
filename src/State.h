@@ -9,6 +9,7 @@
 
 #include "Actor.h"
 #include "Constants.h"
+#include "USMData.h"
 #include "Util.h"
 #include "Wall.h"
 #include <Magnum/Magnum.h>
@@ -19,36 +20,6 @@
 #include <utility>
 
 namespace CollisionSim {
-
-template<typename T>
-struct USMData {
-    USMData() = delete;
-    explicit USMData(size_t count, sycl::queue* q)
-        : queue{q}, hostContainer(count), devicePointer{sycl::malloc_device<T>(count, *q)} {}
-    ~USMData() {
-        sycl::free(devicePointer, *queue);
-    }
-    USMData(const USMData&) = delete;
-    USMData(USMData&&) = delete;
-    USMData& operator=(const USMData&) = delete;
-    USMData& operator=(USMData&&) = delete;
-    sycl::event copyToDevice() const {
-        return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size());
-    }
-    sycl::event copyToDevice(sycl::event depEvent) const {
-        return queue->memcpy(devicePointer, hostContainer.data(), sizeof(T)*hostContainer.size(), depEvent);
-    }
-    sycl::event copyToHost() {
-        return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size());
-    }
-    sycl::event copyToHost(sycl::event depEvent) {
-        return queue->memcpy(hostContainer.data(), devicePointer, sizeof(T)*hostContainer.size(), depEvent);
-    }
-
-    sycl::queue* queue; // non-owning pointer
-    std::vector<T> hostContainer;
-    T* devicePointer; // owning pointer
-};
 
 struct Edge {
     uint16_t actorIndex{std::numeric_limits<uint16_t>::max()};
@@ -93,29 +64,28 @@ class ParallelState {
         /// Enqueue copy of all data to the device and return immediately
         void copyAllToDeviceAsync() const;
 
-        size_t numActors{0};
         size_t numAllVertices{0};
 
         /// Constants
         ///@{
         USMData<float> worldBoundaries;
         USMData<uint16_t> actorIndices; // Caution: restricting numActors to 65536
-        USMData<float> mass;
-        USMData<float3x3> bodyInertiaInv;
+        USMData<float,Constants::NumActors> mass;
+        USMData<float3x3,Constants::NumActors> bodyInertiaInv;
         std::array<USMData<float>,3> bodyVertices;
         ///@}
 
         /// Motion simulation variables
         ///@{
-        USMData<sycl::float3> translation;
-        USMData<float3x3> rotation;
-        USMData<float3x3> inertiaInv;
-        USMData<sycl::float3> linearVelocity;
-        USMData<sycl::float3> angularVelocity;
-        USMData<sycl::float3> linearMomentum;
-        USMData<sycl::float3> angularMomentum;
-        USMData<sycl::float3> force;
-        USMData<sycl::float3> torque;
+        USMData<sycl::float3,Constants::NumActors> translation;
+        USMData<float3x3,Constants::NumActors> rotation;
+        USMData<float3x3,Constants::NumActors> inertiaInv;
+        USMData<sycl::float3,Constants::NumActors> linearVelocity;
+        USMData<sycl::float3,Constants::NumActors> angularVelocity;
+        USMData<sycl::float3,Constants::NumActors> linearMomentum;
+        USMData<sycl::float3,Constants::NumActors> angularMomentum;
+        USMData<sycl::float3,Constants::NumActors> force;
+        USMData<sycl::float3,Constants::NumActors> torque;
         ///@}
 
         /// Collision simulation variables

@@ -13,9 +13,6 @@
 #include <numeric>
 #include <unordered_set>
 
-class actor_kernel;
-class vertex_kernel;
-
 namespace CollisionSim::Simulation {
 
 // -----------------------------------------------------------------------------
@@ -342,7 +339,7 @@ void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState
 void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* state, sycl::queue* queue) {
     using float3x3 = CollisionSim::ParallelState::float3x3;
     // Copy inputs from Actor objects to serial state data
-    for (size_t iActor{0}; iActor<state->numActors; ++iActor) {
+    for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
         state->linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
         state->angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].angularVelocity());
         state->force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
@@ -380,7 +377,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
 
         sycl::event actorKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
-            cgh.parallel_for<actor_kernel>(state->numActors, [=](sycl::id<1> id){
+            cgh.parallel_for<class actor_kernel>(Constants::NumActors, [=](sycl::id<1> id){
                 // Compute linear and angular momentum
                 auto linearMomentum = mass[id] * linearVelocity[id];
                 auto angularMomentum = Util::mvmul(Util::inverse(inertiaInv[id]), angularVelocity[id]);
@@ -418,7 +415,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         // Update vertex positions and calculate world collisions
         sycl::event vertexKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(actorKernelEvent);
-            cgh.parallel_for<vertex_kernel>(state->numAllVertices, [=](sycl::id<1> id){
+            cgh.parallel_for<class vertex_kernel>(state->numAllVertices, [=](sycl::id<1> id){
                 uint16_t iActor = actorIndices[id];
 
                 sycl::float3 vertex{
@@ -476,7 +473,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
     }
 
     // Reset force and torque, and transfer serial state data to Actor objects
-    for (size_t iActor{0}; iActor<state->numActors; ++iActor) {
+    for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
         actors[iActor].force({0, 0, 0});
         actors[iActor].torque({0, 0, 0});
         actors[iActor].transformation(Util::transformationMatrix(state->translation.hostContainer[iActor], state->rotation.hostContainer[iActor]));
