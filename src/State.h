@@ -98,6 +98,7 @@ class ParallelState {
         USMData<sycl::float3> addAngularVelocity; /// Per-vertex collision response
         std::array<USMData<sycl::float2, Constants::NumActors>,3> aabb;
         std::array<USMData<Edge, 2*Constants::NumActors>,3> sortedAABBEdges;
+        USMData<bool,Constants::NumActorPairs> aabbOverlaps;
         ///@}
 };
 

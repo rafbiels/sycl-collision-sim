@@ -47,7 +47,8 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
     USMData{queue, edgeArray(std::make_index_sequence<Constants::NumActors>{})}, // x
     USMData{queue, edgeArray(std::make_index_sequence<Constants::NumActors>{})}, // y
     USMData{queue, edgeArray(std::make_index_sequence<Constants::NumActors>{})}, // z
-  } {
+  },
+  aabbOverlaps{queue} {
 
     worldBoundaries.hostContainer.assign({
         worldBounds.min()[0], worldBounds.max()[0],

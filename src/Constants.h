@@ -59,7 +59,31 @@ constexpr static float EarthGravity{-9.81f * Units::Distance / (Units::Time * Un
 /// Restitution coefficient (fraction of kinematic energy conserved in a collision)
 constexpr static float RestitutionCoefficient{0.95f};
 
-} // namespace CollisionSim::Constants
+/// Look-up table binomial coefficient of n^2 for small numbers
+template<size_t n>
+consteval size_t binomialCoefficientOfSquare() {
+    static_assert(n<13);
+    std::array<size_t,13> lut{{0, 0, 6, 36, 120, 300, 630, 1176, 2016, 3240, 4950, 7260, 10296}};
+    return lut[n];
+}
 
+constexpr static size_t NumActorPairs{binomialCoefficientOfSquare<Constants::SqrtNumActors>()};
+
+/// Compile-time list of non-repeat pairs among N=NumActors items
+consteval std::array<std::pair<size_t,size_t>,NumActorPairs> _actorPairsGenerator() {
+    std::array<std::pair<size_t,size_t>,NumActorPairs> ret;
+    size_t linear_index{0};
+    for (size_t i{0}; i<Constants::NumActors-1; ++i) {
+        for (size_t j{i+i}; j<Constants::NumActors; ++j) {
+            ret[linear_index] = {i,j};
+            ++linear_index;
+        }
+    }
+    return ret;
+}
+
+constexpr static std::array<std::pair<size_t,size_t>,NumActorPairs> ActorPairs{_actorPairsGenerator()};
+
+} // namespace CollisionSim::ConstantUtil
 
 #endif // COLLISION_SIM_CONSTANTS

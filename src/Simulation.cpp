@@ -169,6 +169,11 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
         }
     }
 
+    // Corrade::Utility::Debug{} << "--------------------------------------------------";
+    // Corrade::Utility::Debug{} << "Edges x: " << state->sortedAABBEdges[0];
+    // Corrade::Utility::Debug{} << "Edges y: " << state->sortedAABBEdges[1];
+    // Corrade::Utility::Debug{} << "Edges z: " << state->sortedAABBEdges[2];
+
     // Second pass to determine overlaps
     std::unordered_set<uint16_t> current;
     std::array<Util::OverlapSet, 3> overlaps; // for each axis
@@ -391,6 +396,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             state->sortedAABBEdges[1].devicePointer,
             state->sortedAABBEdges[2].devicePointer
         };
+        bool* aabbOverlaps = state->aabbOverlaps.devicePointer;
 
         sycl::event actorKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
@@ -509,11 +515,11 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
                     auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
                         return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
                     };
-                    auto edgeLess = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
-                        return edgeValue(axis, edgeA) < edgeValue(axis, edgeB);
+                    auto edgeGreater = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
+                        return edgeValue(axis, edgeA) > edgeValue(axis, edgeB);
                     };
-                    auto compareExchange = [aabb, &edgeLess](unsigned int axis, Edge& edgeA, Edge& edgeB) constexpr -> void {
-                        if (edgeLess(axis,edgeA,edgeB)) {std::swap(edgeA, edgeB);}
+                    auto compareExchange = [aabb, &edgeGreater](unsigned int axis, Edge& edgeA, Edge& edgeB) constexpr -> void {
+                        if (edgeGreater(axis,edgeA,edgeB)) {std::swap(edgeA, edgeB);}
                     };
                     size_t i = id * 2 + step%2;
                     if ((i+1) >= (2*Constants::NumActors)) {return;}
@@ -524,21 +530,59 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         }
 
+        // Find overlapping AABB pairs
+        sycl::event aabbOverlapKernelEvent = queue->submit([&](sycl::handler& cgh){
+            cgh.depends_on(aabbSortKernelEvent.value());
+            cgh.parallel_for<class aabb_overlap_kernel>(Constants::NumActorPairs, [=](sycl::id<1> id){
+                size_t iActorA{Constants::ActorPairs[id].first};
+                size_t iActorB{Constants::ActorPairs[id].second};
+                sycl::int3 posStartA{-1};
+                sycl::int3 posStartB{-1};
+                sycl::int3 posEndA{-1};
+                sycl::int3 posEndB{-1};
+                for (int iEdge{0}; iEdge<static_cast<int>(2*Constants::NumActors); ++iEdge) {
+                    #pragma unroll
+                    for (size_t axis{0}; axis<3; ++axis) {
+                        const Edge& edge{sortedAABBEdges[axis][iEdge]};
+                        if (edge.actorIndex==iActorA) {
+                            if (edge.isEnd) {posEndA[axis] = iEdge;}
+                            else {posStartA[axis] = iEdge;}
+                        } else if (edge.actorIndex==iActorB) {
+                            if (edge.isEnd) {posEndB[axis] = iEdge;}
+                            else {posStartB[axis] = iEdge;}
+                        }
+                    }
+                }
+                aabbOverlaps[id] = (
+                    (
+                    (posStartA[0] < posStartB[0] && posStartB[0] < posEndA[0]) &&
+                    (posStartA[1] < posStartB[1] && posStartB[1] < posEndA[1]) &&
+                    (posStartA[2] < posStartB[2] && posStartB[2] < posEndA[2])
+                    ) || (
+                    (posStartA[0] < posEndB[0] && posEndB[0] < posEndA[0]) &&
+                    (posStartA[1] < posEndB[1] && posEndB[1] < posEndA[1]) &&
+                    (posStartA[2] < posEndB[2] && posEndB[2] < posEndA[2])
+                    )
+                );
+            });
+        });
+
         // TODO: clean up what needs to be copied and what it needs to wait for
         std::vector<sycl::event> d2hCopyEvents{
-            state->wallCollisions.copyToHost(aabbSortKernelEvent.value()),
-            state->addLinearVelocity.copyToHost(aabbSortKernelEvent.value()),
-            state->addAngularVelocity.copyToHost(aabbSortKernelEvent.value()),
-            state->translation.copyToHost(aabbSortKernelEvent.value()),
-            state->rotation.copyToHost(aabbSortKernelEvent.value()),
-            state->linearVelocity.copyToHost(aabbSortKernelEvent.value()),
-            state->angularVelocity.copyToHost(aabbSortKernelEvent.value()),
-            state->aabb[0].copyToHost(aabbSortKernelEvent.value()),
-            state->aabb[1].copyToHost(aabbSortKernelEvent.value()),
-            state->aabb[2].copyToHost(aabbSortKernelEvent.value()),
-            state->sortedAABBEdges[0].copyToHost(aabbSortKernelEvent.value()),
-            state->sortedAABBEdges[1].copyToHost(aabbSortKernelEvent.value()),
-            state->sortedAABBEdges[2].copyToHost(aabbSortKernelEvent.value()),
+            state->wallCollisions.copyToHost(aabbOverlapKernelEvent),
+            state->addLinearVelocity.copyToHost(aabbOverlapKernelEvent),
+            state->addAngularVelocity.copyToHost(aabbOverlapKernelEvent),
+            state->translation.copyToHost(aabbOverlapKernelEvent),
+            state->rotation.copyToHost(aabbOverlapKernelEvent),
+            state->linearVelocity.copyToHost(aabbOverlapKernelEvent),
+            state->angularVelocity.copyToHost(aabbOverlapKernelEvent),
+            state->aabb[0].copyToHost(aabbOverlapKernelEvent),
+            state->aabb[1].copyToHost(aabbOverlapKernelEvent),
+            state->aabb[2].copyToHost(aabbOverlapKernelEvent),
+            state->sortedAABBEdges[0].copyToHost(aabbOverlapKernelEvent),
+            state->sortedAABBEdges[1].copyToHost(aabbOverlapKernelEvent),
+            state->sortedAABBEdges[2].copyToHost(aabbOverlapKernelEvent),
+            state->aabbOverlaps.copyToHost(aabbOverlapKernelEvent),
         };
         sycl::event::wait_and_throw(d2hCopyEvents);
     } catch (const std::exception& ex) {
@@ -555,6 +599,12 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
     // Corrade::Utility::Debug{} << "Edges x: " << state->sortedAABBEdges[0].hostContainer;
     // Corrade::Utility::Debug{} << "Edges y: " << state->sortedAABBEdges[1].hostContainer;
     // Corrade::Utility::Debug{} << "Edges z: " << state->sortedAABBEdges[2].hostContainer;
+    // for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
+    //     if (state->aabbOverlaps.hostContainer[iPair]) {
+    //         const std::pair<size_t,size_t>& p{Constants::ActorPairs[iPair]};
+    //         Corrade::Utility::Debug{} << "Actors collide: " << p.first << ", " << p.second;
+    //     }
+    // }
 
     // Reset force and torque, and transfer serial state data to Actor objects
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
