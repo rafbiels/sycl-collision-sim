@@ -80,6 +80,7 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
         // Note: world vertices are left uninitialised as they are only calculated on the device
         vertexOffset += numVerticesThisActor;
     }
+    Corrade::Utility::Debug{} << "[ctor] Edges x: " << sortedAABBEdges[0].hostContainer;
 }
 
 // -----------------------------------------------------------------------------
@@ -108,6 +109,9 @@ void CollisionSim::ParallelState::copyAllToDeviceAsync() const {
     wallCollisions.copyToDevice();
     addLinearVelocity.copyToDevice();
     addAngularVelocity.copyToDevice();
+    sortedAABBEdges[0].copyToDevice();
+    sortedAABBEdges[1].copyToDevice();
+    sortedAABBEdges[2].copyToDevice();
 }
 
 // -----------------------------------------------------------------------------

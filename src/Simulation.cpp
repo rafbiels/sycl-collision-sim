@@ -498,48 +498,30 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
-        // Sort the AABB edges using bitonic sort, following:
-        // https://github.com/oneapi-src/oneAPI-samples/tree/master/DirectProgramming/C++SYCL/GraphTraversal/bitonic-sort
+        // Sort the AABB edges using odd-even merge-sort
         std::optional<sycl::event> aabbSortKernelEvent;
-        size_t numSteps = static_cast<size_t>(std::ceil(std::log2(2*Constants::NumActors)));
-        size_t gridSize{1ul << numSteps}; // 2**numSteps
-        for (size_t step{0}; step<numSteps; ++step) {
-            for (int stage=step; stage>=0; --stage) {
-                const size_t seq_len{1ul << (stage + 1ul)}; // 2**(stage+1)
-                const size_t two_power{1ul << (step - stage)}; // 2**(step-stage)
-                aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
-                    if (aabbSortKernelEvent.has_value()) {
-                        cgh.depends_on(aabbSortKernelEvent.value());
-                    }
-                    cgh.parallel_for<class aabb_sort_kernel>(gridSize, [=](sycl::id<1> id){
-                        auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
-                            return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
-                        };
-                        auto edgeLess = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
-                            return edgeValue(axis, edgeA) < edgeValue(axis, edgeB);
-                        };
-                        auto edgeGreater = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
-                            return edgeValue(axis, edgeA) > edgeValue(axis, edgeB);
-                        };
-
-                        if (id >= 2*Constants::NumActors) {return;}
-                        int seq_num = static_cast<int>(id / seq_len);
-                        int swapped_elem{-1};
-                        int h_len = static_cast<int>(seq_len / 2);
-                        if (id < (seq_len*seq_num) + h_len) {
-                            swapped_elem = id + h_len;
-                        }
-                        int odd = static_cast<int>(seq_num / two_power);
-                        bool increasing{(odd%2)==0};
-                        if (swapped_elem != -1) {
-                            if ((edgeGreater(0, sortedAABBEdges[0][id], sortedAABBEdges[0][swapped_elem]) && increasing) ||
-                                (edgeLess(0, sortedAABBEdges[0][id], sortedAABBEdges[0][swapped_elem]) && !increasing)) {
-                                std::swap(sortedAABBEdges[0][id], sortedAABBEdges[0][swapped_elem]);
-                            }
-                        }
-                    });
+        for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
+            aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
+                if (aabbSortKernelEvent.has_value()) {
+                    cgh.depends_on(aabbSortKernelEvent.value());
+                }
+                cgh.parallel_for<class aabb_sort_kernel>(Constants::NumActors, [=](sycl::id<1> id){
+                    auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
+                        return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
+                    };
+                    auto edgeLess = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
+                        return edgeValue(axis, edgeA) < edgeValue(axis, edgeB);
+                    };
+                    auto compareExchange = [aabb, &edgeLess](unsigned int axis, Edge& edgeA, Edge& edgeB) constexpr -> void {
+                        if (edgeLess(axis,edgeA,edgeB)) {std::swap(edgeA, edgeB);}
+                    };
+                    size_t i = id * 2 + step%2;
+                    if ((i+1) >= (2*Constants::NumActors)) {return;}
+                    compareExchange(0, sortedAABBEdges[0][i], sortedAABBEdges[0][i+1]);
+                    compareExchange(1, sortedAABBEdges[1][i], sortedAABBEdges[1][i+1]);
+                    compareExchange(2, sortedAABBEdges[2][i], sortedAABBEdges[2][i+1]);
                 });
-            }
+            });
         }
 
         // TODO: clean up what needs to be copied and what it needs to wait for
@@ -568,6 +550,11 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
     //     << "), y=(" << state->aabb[1].hostContainer[4][0] << "," << state->aabb[1].hostContainer[4][1]
     //     << "), z=(" << state->aabb[2].hostContainer[4][0] << "," << state->aabb[2].hostContainer[4][1]
     //     << ")";
+
+    // Corrade::Utility::Debug{} << "--------------------------------------------------";
+    // Corrade::Utility::Debug{} << "Edges x: " << state->sortedAABBEdges[0].hostContainer;
+    // Corrade::Utility::Debug{} << "Edges y: " << state->sortedAABBEdges[1].hostContainer;
+    // Corrade::Utility::Debug{} << "Edges z: " << state->sortedAABBEdges[2].hostContainer;
 
     // Reset force and torque, and transfer serial state data to Actor objects
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
