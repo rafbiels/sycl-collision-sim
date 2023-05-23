@@ -435,6 +435,14 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
+        // Start copying back to host data needed there which won't change beyond this point
+        std::vector<sycl::event> d2hCopyEvents{
+            state->linearVelocity.copyToHost(actorKernelEvent),
+            state->angularVelocity.copyToHost(actorKernelEvent),
+            state->translation.copyToHost(actorKernelEvent),
+            state->rotation.copyToHost(actorKernelEvent),
+        };
+
         // Update vertex positions and calculate world collisions
         sycl::event vertexKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(actorKernelEvent);
@@ -483,6 +491,13 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
                 bool ignoreAwayFromWall{sycl::dot(linearVelocity[iActor], normal) > 0.0f};
                 wallCollisions[id] = static_cast<Wall>(static_cast<WallUnderlyingType>(collision) * !ignoreAwayFromWall);
             });
+        });
+
+        // Start copying back to host data needed there which won't change beyond this point
+        d2hCopyEvents.insert(d2hCopyEvents.end(), {
+            state->wallCollisions.copyToHost(vertexKernelEvent),
+            state->addLinearVelocity.copyToHost(vertexKernelEvent),
+            state->addAngularVelocity.copyToHost(vertexKernelEvent),
         });
 
         // Calculate the axis-align bounding boxes for each actor
@@ -553,37 +568,30 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
                         }
                     }
                 }
+                auto overlap = [](float a1, float a2, float b1, float b2) constexpr -> bool {
+                    return (a1 < b1 && b1 < a2) || (b1 < a1 && a1 < b2);
+                };
                 aabbOverlaps[id] = (
-                    (
-                    (posStartA[0] < posStartB[0] && posStartB[0] < posEndA[0]) &&
-                    (posStartA[1] < posStartB[1] && posStartB[1] < posEndA[1]) &&
-                    (posStartA[2] < posStartB[2] && posStartB[2] < posEndA[2])
-                    ) || (
-                    (posStartA[0] < posEndB[0] && posEndB[0] < posEndA[0]) &&
-                    (posStartA[1] < posEndB[1] && posEndB[1] < posEndA[1]) &&
-                    (posStartA[2] < posEndB[2] && posEndB[2] < posEndA[2])
-                    )
+                    overlap(posStartA[0], posEndA[0], posStartB[0], posEndB[0]) &&
+                    overlap(posStartA[1], posEndA[1], posStartB[1], posEndB[1]) &&
+                    overlap(posStartA[2], posEndA[2], posStartB[2], posEndB[2])
                 );
             });
         });
 
-        // TODO: clean up what needs to be copied and what it needs to wait for
-        std::vector<sycl::event> d2hCopyEvents{
-            state->wallCollisions.copyToHost(aabbOverlapKernelEvent),
-            state->addLinearVelocity.copyToHost(aabbOverlapKernelEvent),
-            state->addAngularVelocity.copyToHost(aabbOverlapKernelEvent),
-            state->translation.copyToHost(aabbOverlapKernelEvent),
-            state->rotation.copyToHost(aabbOverlapKernelEvent),
-            state->linearVelocity.copyToHost(aabbOverlapKernelEvent),
-            state->angularVelocity.copyToHost(aabbOverlapKernelEvent),
-            state->aabb[0].copyToHost(aabbOverlapKernelEvent),
-            state->aabb[1].copyToHost(aabbOverlapKernelEvent),
-            state->aabb[2].copyToHost(aabbOverlapKernelEvent),
-            state->sortedAABBEdges[0].copyToHost(aabbOverlapKernelEvent),
-            state->sortedAABBEdges[1].copyToHost(aabbOverlapKernelEvent),
-            state->sortedAABBEdges[2].copyToHost(aabbOverlapKernelEvent),
+        // Start copying back to host data needed there which won't change beyond this point
+        d2hCopyEvents.insert(d2hCopyEvents.end(), {
+            // FIXME: currently only copied over for debug printout
+            // state->aabb[0].copyToHost(aabbOverlapKernelEvent),
+            // state->aabb[1].copyToHost(aabbOverlapKernelEvent),
+            // state->aabb[2].copyToHost(aabbOverlapKernelEvent),
+            // state->sortedAABBEdges[0].copyToHost(aabbOverlapKernelEvent),
+            // state->sortedAABBEdges[1].copyToHost(aabbOverlapKernelEvent),
+            // state->sortedAABBEdges[2].copyToHost(aabbOverlapKernelEvent),
             state->aabbOverlaps.copyToHost(aabbOverlapKernelEvent),
-        };
+        });
+
+        // Wait for all the device-to-host memory copies to finish
         sycl::event::wait_and_throw(d2hCopyEvents);
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
@@ -595,16 +603,16 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
     //     << "), z=(" << state->aabb[2].hostContainer[4][0] << "," << state->aabb[2].hostContainer[4][1]
     //     << ")";
 
-    // Corrade::Utility::Debug{} << "--------------------------------------------------";
+    Corrade::Utility::Debug{} << "--------------------------------------------------";
     // Corrade::Utility::Debug{} << "Edges x: " << state->sortedAABBEdges[0].hostContainer;
     // Corrade::Utility::Debug{} << "Edges y: " << state->sortedAABBEdges[1].hostContainer;
     // Corrade::Utility::Debug{} << "Edges z: " << state->sortedAABBEdges[2].hostContainer;
-    // for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
-    //     if (state->aabbOverlaps.hostContainer[iPair]) {
-    //         const std::pair<size_t,size_t>& p{Constants::ActorPairs[iPair]};
-    //         Corrade::Utility::Debug{} << "Actors collide: " << p.first << ", " << p.second;
-    //     }
-    // }
+    for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
+        if (state->aabbOverlaps.hostContainer[iPair]) {
+            const std::pair<size_t,size_t>& p{Constants::ActorPairs[iPair]};
+            Corrade::Utility::Debug{} << "Actors collide: " << p.first << ", " << p.second;
+        }
+    }
 
     // Reset force and torque, and transfer serial state data to Actor objects
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
