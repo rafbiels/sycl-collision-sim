@@ -81,7 +81,6 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
         // Note: world vertices are left uninitialised as they are only calculated on the device
         vertexOffset += numVerticesThisActor;
     }
-    Corrade::Utility::Debug{} << "[ctor] Edges x: " << sortedAABBEdges[0].hostContainer;
 }
 
 // -----------------------------------------------------------------------------

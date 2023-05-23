@@ -169,11 +169,6 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
         }
     }
 
-    // Corrade::Utility::Debug{} << "--------------------------------------------------";
-    // Corrade::Utility::Debug{} << "Edges x: " << state->sortedAABBEdges[0];
-    // Corrade::Utility::Debug{} << "Edges y: " << state->sortedAABBEdges[1];
-    // Corrade::Utility::Debug{} << "Edges z: " << state->sortedAABBEdges[2];
-
     // Second pass to determine overlaps
     std::unordered_set<uint16_t> current;
     std::array<Util::OverlapSet, 3> overlaps; // for each axis
@@ -579,39 +574,10 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
-        // Start copying back to host data needed there which won't change beyond this point
-        d2hCopyEvents.insert(d2hCopyEvents.end(), {
-            // FIXME: currently only copied over for debug printout
-            // state->aabb[0].copyToHost(aabbOverlapKernelEvent),
-            // state->aabb[1].copyToHost(aabbOverlapKernelEvent),
-            // state->aabb[2].copyToHost(aabbOverlapKernelEvent),
-            // state->sortedAABBEdges[0].copyToHost(aabbOverlapKernelEvent),
-            // state->sortedAABBEdges[1].copyToHost(aabbOverlapKernelEvent),
-            // state->sortedAABBEdges[2].copyToHost(aabbOverlapKernelEvent),
-            state->aabbOverlaps.copyToHost(aabbOverlapKernelEvent),
-        });
-
         // Wait for all the device-to-host memory copies to finish
         sycl::event::wait_and_throw(d2hCopyEvents);
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
-    }
-
-    // Corrade::Utility::Debug{} << "Actor 4 AABB:"
-    //     << "x=(" << state->aabb[0].hostContainer[4][0] << "," << state->aabb[0].hostContainer[4][1]
-    //     << "), y=(" << state->aabb[1].hostContainer[4][0] << "," << state->aabb[1].hostContainer[4][1]
-    //     << "), z=(" << state->aabb[2].hostContainer[4][0] << "," << state->aabb[2].hostContainer[4][1]
-    //     << ")";
-
-    Corrade::Utility::Debug{} << "--------------------------------------------------";
-    // Corrade::Utility::Debug{} << "Edges x: " << state->sortedAABBEdges[0].hostContainer;
-    // Corrade::Utility::Debug{} << "Edges y: " << state->sortedAABBEdges[1].hostContainer;
-    // Corrade::Utility::Debug{} << "Edges z: " << state->sortedAABBEdges[2].hostContainer;
-    for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
-        if (state->aabbOverlaps.hostContainer[iPair]) {
-            const std::pair<size_t,size_t>& p{Constants::ActorPairs[iPair]};
-            Corrade::Utility::Debug{} << "Actors collide: " << p.first << ", " << p.second;
-        }
     }
 
     // Reset force and torque, and transfer serial state data to Actor objects

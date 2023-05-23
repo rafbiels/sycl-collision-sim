@@ -222,14 +222,14 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
     };
 }
 
-///
+/// Structure returned by \c closestPointOnTriangle
 struct ClosestPointOnTriangleReturnValue {
     sycl::float3 bestPointOnTriangle{0.0f,0.0f,0.0f};
     float distanceSquared{0.0f};
     size_t iVertex{0};
 };
 
-/// @brief Returns the closest point P and distance d as {Px, Py, Pz, d} 
+/// Returns the closest point P and distance d as {Px, Py, Pz, d}
 ClosestPointOnTriangleReturnValue closestPointOnTriangle(
     const std::array<sycl::float3,3>& triangle,
     const std::array<std::vector<float>,3>& vertices);
