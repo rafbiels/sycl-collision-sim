@@ -456,12 +456,12 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 sycl::float3 vertex{worldVertices[0][id], worldVertices[1][id], worldVertices[2][id]};
 
                 Wall collision{Wall::None};
-                collision |= (WallUnderlyingType{vertex[0] <= worldBoundaries[0]} << 0);
-                collision |= (WallUnderlyingType{vertex[0] >= worldBoundaries[1]} << 1);
-                collision |= (WallUnderlyingType{vertex[1] <= worldBoundaries[2]} << 2);
-                collision |= (WallUnderlyingType{vertex[1] >= worldBoundaries[3]} << 3);
-                collision |= (WallUnderlyingType{vertex[2] <= worldBoundaries[4]} << 4);
-                collision |= (WallUnderlyingType{vertex[2] >= worldBoundaries[5]} << 5);
+                collision |= (static_cast<WallUnderlyingType>(vertex[0] <= worldBoundaries[0]) << 0);
+                collision |= (static_cast<WallUnderlyingType>(vertex[0] >= worldBoundaries[1]) << 1);
+                collision |= (static_cast<WallUnderlyingType>(vertex[1] <= worldBoundaries[2]) << 2);
+                collision |= (static_cast<WallUnderlyingType>(vertex[1] >= worldBoundaries[3]) << 3);
+                collision |= (static_cast<WallUnderlyingType>(vertex[2] <= worldBoundaries[4]) << 4);
+                collision |= (static_cast<WallUnderlyingType>(vertex[2] >= worldBoundaries[5]) << 5);
 
                 sycl::float3 normal = wallNormal(collision);
                 sycl::float3 radius{vertex - translation[iActor]};
@@ -476,7 +476,9 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 addLinearVelocity[id] = (impulse / mass[iActor]) * normal;
                 addAngularVelocity[id] = impulse * b;
                 bool ignoreAwayFromWall{sycl::dot(linearVelocity[iActor], normal) > 0.0f};
-                wallCollisions[id] = static_cast<Wall>(static_cast<WallUnderlyingType>(collision) * !ignoreAwayFromWall);
+                wallCollisions[id] = static_cast<Wall>(
+                    static_cast<WallUnderlyingType>(collision) *
+                    static_cast<WallUnderlyingType>(!ignoreAwayFromWall));
             });
         });
 
@@ -550,7 +552,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 sycl::int3 posEndB{-1};
                 for (int iEdge{0}; iEdge<static_cast<int>(2*Constants::NumActors); ++iEdge) {
                     #pragma unroll
-                    for (size_t axis{0}; axis<3; ++axis) {
+                    for (int axis{0}; axis<3; ++axis) {
                         const Edge& edge{sortedAABBEdges[axis][iEdge]};
                         if (edge.actorIndex==iActorA) {
                             if (edge.isEnd) {posEndA[axis] = iEdge;}
@@ -561,7 +563,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                         }
                     }
                 }
-                auto overlap = [](float a1, float a2, float b1, float b2) constexpr -> bool {
+                auto overlap = [](int a1, int a2, int b1, int b2) constexpr -> bool {
                     return (a1 < b1 && b1 < a2) || (b1 < a1 && a1 < b2);
                 };
                 aabbOverlaps[id] = (
