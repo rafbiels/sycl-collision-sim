@@ -141,7 +141,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
 }
 
 // -----------------------------------------------------------------------------
-void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) {
+void collideBroadSequential(std::vector<Actor>& actors, SequentialState& state) {
     // ===========================================
     // Sweep and prune algorithm as described in D.J. Tracy, S.R. Buss, B.M. Woods,
     // Efficient Large-Scale Sweep and Prune Methods with AABB Insertion and Removal, 2009
@@ -161,7 +161,7 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
 
     // Insertion sort
     for (unsigned int axis{0}; axis<3; ++axis) {
-        auto& edges{state->sortedAABBEdges[axis]};
+        auto& edges{state.sortedAABBEdges[axis]};
         for (size_t i{1}; i<2*Constants::NumActors; ++i) {
             for (size_t j{i}; j>0 && cmp(axis, edges[j], edges[j-1]); --j) {
                 std::swap(edges[j], edges[j-1]);
@@ -173,7 +173,7 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
     std::unordered_set<uint16_t> current;
     std::array<Util::OverlapSet, 3> overlaps; // for each axis
     for (unsigned int axis{0}; axis<3; ++axis) {
-        auto& edges{state->sortedAABBEdges[axis]};
+        auto& edges{state.sortedAABBEdges[axis]};
         for (size_t i{0}; i<2*Constants::NumActors; ++i) {
             Edge edge{edges[i]};
             if (edge.isEnd) {
@@ -192,21 +192,21 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state) 
     }
 
     // Find the intersection of overlaps across the 3 axes
-    state->aabbOverlaps.clear();
+    state.aabbOverlaps.clear();
     for (const std::pair<uint16_t,uint16_t> overlap : overlaps[0]) {
         if (overlaps[1].contains(overlap) && overlaps[2].contains(overlap)) {
-            state->aabbOverlaps.insert(overlap);
+            state.aabbOverlaps.insert(overlap);
         }
     }
 }
 
 // -----------------------------------------------------------------------------
-void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state) {
+void collideNarrowSequential(std::vector<Actor>& actors, SequentialState& state) {
     // ===========================================
     // Algorithm finding the closest vertex-triangle pair from two bodies
     // and comparing against a fixed threshold
     // ===========================================
-    for (const auto [iActorA, iActorB] : state->aabbOverlaps) {
+    for (const auto [iActorA, iActorB] : state.aabbOverlaps) {
         const auto& verticesA{actors[iActorA].vertexPositionsWorld()};
         const auto& verticesB{actors[iActorB].vertexPositionsWorld()};
         const auto& indicesA{actors[iActorA].meshData().indicesAsArray()};
@@ -324,76 +324,76 @@ void impulseCollision(Actor& a, Actor& b, const Magnum::Vector3& point, const Ma
 }
 
 // -----------------------------------------------------------------------------
-void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState* state) {
+void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState& state) {
     for (Actor& actor : actors) {
         // Fix floating point loss of orthogonality in the rotation matrix
         Util::orthonormaliseRotation(actor.transformation());
     }
     simulateMotionSequential(dtime, actors);
-    collideWorldSequential(actors, state->worldBoundaries);
+    collideWorldSequential(actors, state.worldBoundaries);
     collideBroadSequential(actors, state);
     collideNarrowSequential(actors, state);
 }
 
 // -----------------------------------------------------------------------------
-void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* state, sycl::queue* queue) {
+void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& state, sycl::queue& queue) {
     using float3x3 = CollisionSim::ParallelState::float3x3;
     // Copy inputs from Actor objects to serial state data
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
-        state->linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
-        state->angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].angularVelocity());
-        state->force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
-        state->torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
+        state.linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
+        state.angularVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].angularVelocity());
+        state.force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
+        state.torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
     }
     try {
         std::vector<sycl::event> h2dCopyEvents{
-            state->linearVelocity.copyToDevice(),
-            state->angularVelocity.copyToDevice(),
-            state->force.copyToDevice(),
-            state->torque.copyToDevice()
+            state.linearVelocity.copyToDevice(),
+            state.angularVelocity.copyToDevice(),
+            state.force.copyToDevice(),
+            state.torque.copyToDevice()
         };
 
         // Device pointers to be captured by lambda and copied to device
         // - this is to avoid dereferencing on device the state host pointer
-        float* worldBoundaries = state->worldBoundaries.devicePointer;
-        float* mass = state->mass.devicePointer;
-        uint16_t* actorIndices = state->actorIndices.devicePointer;
-        sycl::float3* linearVelocity = state->linearVelocity.devicePointer;
-        float3x3* inertiaInv = state->inertiaInv.devicePointer;
-        sycl::float3* translation = state->translation.devicePointer;
-        sycl::float3* addLinearVelocity = state->addLinearVelocity.devicePointer;
-        sycl::float3* addAngularVelocity = state->addAngularVelocity.devicePointer;
-        Wall* wallCollisions = state->wallCollisions.devicePointer;
-        float3x3* bodyInertiaInv = state->bodyInertiaInv.devicePointer;
-        uint16_t* numVertices = state->numVertices.devicePointer;
-        uint32_t* verticesOffset = state->verticesOffset.devicePointer;
+        float* worldBoundaries = state.worldBoundaries.devicePointer;
+        float* mass = state.mass.devicePointer;
+        uint16_t* actorIndices = state.actorIndices.devicePointer;
+        sycl::float3* linearVelocity = state.linearVelocity.devicePointer;
+        float3x3* inertiaInv = state.inertiaInv.devicePointer;
+        sycl::float3* translation = state.translation.devicePointer;
+        sycl::float3* addLinearVelocity = state.addLinearVelocity.devicePointer;
+        sycl::float3* addAngularVelocity = state.addAngularVelocity.devicePointer;
+        Wall* wallCollisions = state.wallCollisions.devicePointer;
+        float3x3* bodyInertiaInv = state.bodyInertiaInv.devicePointer;
+        uint16_t* numVertices = state.numVertices.devicePointer;
+        uint32_t* verticesOffset = state.verticesOffset.devicePointer;
         std::array<float*,3> bodyVertices = {
-            state->bodyVertices[0].devicePointer,
-            state->bodyVertices[1].devicePointer,
-            state->bodyVertices[2].devicePointer
+            state.bodyVertices[0].devicePointer,
+            state.bodyVertices[1].devicePointer,
+            state.bodyVertices[2].devicePointer
         };
         std::array<float*,3> worldVertices = {
-            state->worldVertices[0].devicePointer,
-            state->worldVertices[1].devicePointer,
-            state->worldVertices[2].devicePointer
+            state.worldVertices[0].devicePointer,
+            state.worldVertices[1].devicePointer,
+            state.worldVertices[2].devicePointer
         };
-        sycl::float3* angularVelocity = state->angularVelocity.devicePointer;
-        float3x3* rotation = state->rotation.devicePointer;
-        sycl::float3* force = state->force.devicePointer;
-        sycl::float3* torque = state->torque.devicePointer;
+        sycl::float3* angularVelocity = state.angularVelocity.devicePointer;
+        float3x3* rotation = state.rotation.devicePointer;
+        sycl::float3* force = state.force.devicePointer;
+        sycl::float3* torque = state.torque.devicePointer;
         std::array<sycl::float2*,3> aabb {
-            state->aabb[0].devicePointer,
-            state->aabb[1].devicePointer,
-            state->aabb[2].devicePointer
+            state.aabb[0].devicePointer,
+            state.aabb[1].devicePointer,
+            state.aabb[2].devicePointer
         };
         std::array<Edge*,3> sortedAABBEdges {
-            state->sortedAABBEdges[0].devicePointer,
-            state->sortedAABBEdges[1].devicePointer,
-            state->sortedAABBEdges[2].devicePointer
+            state.sortedAABBEdges[0].devicePointer,
+            state.sortedAABBEdges[1].devicePointer,
+            state.sortedAABBEdges[2].devicePointer
         };
-        bool* aabbOverlaps = state->aabbOverlaps.devicePointer;
+        bool* aabbOverlaps = state.aabbOverlaps.devicePointer;
 
-        sycl::event actorKernelEvent = queue->submit([&](sycl::handler& cgh){
+        sycl::event actorKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
             cgh.parallel_for<class actor_kernel>(Constants::NumActors, [=](sycl::id<1> id){
                 // Compute linear and angular momentum
@@ -431,9 +431,9 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         });
 
         // Update vertex positions and calculate world collisions
-        sycl::event vertexKernelEvent = queue->submit([&](sycl::handler& cgh){
+        sycl::event vertexKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(actorKernelEvent);
-            cgh.parallel_for<class vertex_kernel>(state->numAllVertices, [=](sycl::id<1> id){
+            cgh.parallel_for<class vertex_kernel>(state.numAllVertices, [=](sycl::id<1> id){
                 uint16_t iActor = actorIndices[id];
 
                 // sycl::float3 vertex{
@@ -481,7 +481,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         });
 
         // Calculate the axis-align bounding boxes for each actor
-        sycl::event aabbKernelEvent = queue->submit([&](sycl::handler& cgh){
+        sycl::event aabbKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(vertexKernelEvent);
             constexpr static size_t aabbWorkGroupSize{32};
             const sycl::nd_range<1> aabbRange{Constants::NumActors*aabbWorkGroupSize,aabbWorkGroupSize};
@@ -503,7 +503,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         // Given the small size of the problem we can avoid submitting N(=2*NumActors) kernels.
         // Instead, we can submit one kernel with a single work-group and exploit a work-group barrier.
         // This requires that N is smaller than the maximum work-group size of the GPU we're using.
-        sycl::event aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
+        sycl::event aabbSortKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(aabbKernelEvent);
             cgh.parallel_for<class aabb_sort_kernel>(sycl::nd_range<1>{Constants::NumActors, Constants::NumActors}, [=](sycl::nd_item<1> item){
                 auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
@@ -529,17 +529,17 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
 
         // Start copying back to host data needed there which won't change beyond this point
         std::vector<sycl::event> d2hCopyEvents{
-            state->linearVelocity.copyToHost(actorKernelEvent),
-            state->angularVelocity.copyToHost(actorKernelEvent),
-            state->translation.copyToHost(actorKernelEvent),
-            state->rotation.copyToHost(actorKernelEvent),
-            state->wallCollisions.copyToHost(vertexKernelEvent),
-            state->addLinearVelocity.copyToHost(vertexKernelEvent),
-            state->addAngularVelocity.copyToHost(vertexKernelEvent),
+            state.linearVelocity.copyToHost(actorKernelEvent),
+            state.angularVelocity.copyToHost(actorKernelEvent),
+            state.translation.copyToHost(actorKernelEvent),
+            state.rotation.copyToHost(actorKernelEvent),
+            state.wallCollisions.copyToHost(vertexKernelEvent),
+            state.addLinearVelocity.copyToHost(vertexKernelEvent),
+            state.addAngularVelocity.copyToHost(vertexKernelEvent),
         };
 
         // Find overlapping AABB pairs
-        sycl::event aabbOverlapKernelEvent = queue->submit([&](sycl::handler& cgh){
+        sycl::event aabbOverlapKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(aabbSortKernelEvent);
             cgh.parallel_for<class aabb_overlap_kernel>(Constants::NumActorPairs, [=](sycl::id<1> id){
                 size_t iActorA{Constants::ActorPairs[id].first};
@@ -586,9 +586,9 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
         actors[iActor].force({0, 0, 0});
         actors[iActor].torque({0, 0, 0});
-        actors[iActor].transformation(Util::transformationMatrix(state->translation.hostContainer[iActor], state->rotation.hostContainer[iActor]));
-        actors[iActor].linearVelocity(Util::toMagnum(state->linearVelocity.hostContainer[iActor]));
-        actors[iActor].angularVelocity(Util::toMagnum(state->angularVelocity.hostContainer[iActor]));
+        actors[iActor].transformation(Util::transformationMatrix(state.translation.hostContainer[iActor], state.rotation.hostContainer[iActor]));
+        actors[iActor].linearVelocity(Util::toMagnum(state.linearVelocity.hostContainer[iActor]));
+        actors[iActor].angularVelocity(Util::toMagnum(state.angularVelocity.hostContainer[iActor]));
         // Fix floating point loss of orthogonality in the rotation matrix
         Util::orthonormaliseRotation(actors[iActor].transformation());
     }
@@ -600,13 +600,13 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         std::vector<sycl::float3> addAngularV;
     };
     std::unordered_map<size_t, CollisionData> actorCollisions; // {actor index, collision data}
-    for (size_t iVertex{0}; iVertex<state->numAllVertices; ++iVertex) {
-        Wall collision = state->wallCollisions.hostContainer[iVertex];
+    for (size_t iVertex{0}; iVertex<state.numAllVertices; ++iVertex) {
+        Wall collision = state.wallCollisions.hostContainer[iVertex];
         if (collision==Wall::None) {continue;}
-        CollisionData& data = actorCollisions[state->actorIndices.hostContainer[iVertex]];
+        CollisionData& data = actorCollisions[state.actorIndices.hostContainer[iVertex]];
         data.type |= collision;
-        data.addLinearV.push_back(state->addLinearVelocity.hostContainer[iVertex]);
-        data.addAngularV.push_back(state->addAngularVelocity.hostContainer[iVertex]);
+        data.addLinearV.push_back(state.addLinearVelocity.hostContainer[iVertex]);
+        data.addAngularV.push_back(state.addAngularVelocity.hostContainer[iVertex]);
     }
     for (const auto& [iActor, data] : actorCollisions) {
         size_t num{data.addLinearV.size()};

@@ -28,8 +28,7 @@ m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDime
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFPSLongAvgSec{65536},
-m_computeTask{[this]{compute();}},
-m_syclQueue{nullptr}
+m_computeTask{[this]{compute();}}
 {
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::FaceCulling);
@@ -50,11 +49,11 @@ m_syclQueue{nullptr}
     createActors();
 
     if (m_cpuOnly) {
-        m_sequentialState = std::make_unique<SequentialState>(m_world.boundaries());
+        m_sequentialState.emplace(m_world.boundaries());
     } else {
         try {
-            m_syclQueue = std::make_unique<sycl::queue>();
-            m_parallelState = std::make_unique<ParallelState>(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.get());
+            m_syclQueue = sycl::queue{};
+            m_parallelState.emplace(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.value());
             Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
             // Copy initial data to the device
             m_parallelState->copyAllToDeviceAsync();
@@ -84,7 +83,7 @@ m_syclQueue{nullptr}
 // -----------------------------------------------------------------------------
 CollisionSim::Application::~Application() {
     m_computeTask.stop();
-    m_parallelState.reset(); // Free device memory while m_queue is still alive
+    m_parallelState.reset(); // Free device memory
     Corrade::Utility::Debug{} << "Average compute FPS: " << m_computeFPSLongAvgSec.value();
 }
 
@@ -173,9 +172,9 @@ void CollisionSim::Application::compute() {
 
     // Compute collisions and rigid body motion
     if (m_cpuOnly) {
-        Simulation::simulateSequential(simDeltaTime, m_actors, m_sequentialState.get());
+        Simulation::simulateSequential(simDeltaTime, m_actors, m_sequentialState.value());
     } else {
-        Simulation::simulateParallel(simDeltaTime, m_actors, m_parallelState.get(), m_syclQueue.get());
+        Simulation::simulateParallel(simDeltaTime, m_actors, m_parallelState.value(), m_syclQueue.value());
     }
 }
 

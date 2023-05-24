@@ -18,12 +18,12 @@ namespace CollisionSim::Simulation {
 
 void simulateMotionSequential(float dtime, std::vector<Actor>& actors);
 void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries);
-void collideBroadSequential(std::vector<Actor>& actors, SequentialState* state);
-void collideNarrowSequential(std::vector<Actor>& actors, SequentialState* state);
+void collideBroadSequential(std::vector<Actor>& actors, SequentialState& state);
+void collideNarrowSequential(std::vector<Actor>& actors, SequentialState& state);
 void impulseCollision(Actor& a, Actor& b, const Magnum::Vector3& point, const Magnum::Vector3& normal);
 
-void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState* state);
-void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* state, sycl::queue* queue);
+void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState& state);
+void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& state, sycl::queue& queue);
 
 } // namespace CollisionSim::Simulation
 

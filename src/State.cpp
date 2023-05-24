@@ -12,7 +12,7 @@
 CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
                                            const std::vector<Actor>& actors,
                                            size_t numAllVertices,
-                                           sycl::queue* queue)
+                                           const sycl::queue& queue)
 : numAllVertices{numAllVertices},
   worldBoundaries{queue, 6},
   actorIndices{queue, numAllVertices},

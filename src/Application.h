@@ -52,9 +52,9 @@ class Application final : public Magnum::Platform::Application {
         /// Constant count of all vertices calculated at initialisation
         size_t m_numAllVertices{0};
 
-        std::unique_ptr<SequentialState> m_sequentialState;
-        std::unique_ptr<ParallelState> m_parallelState;
-        std::unique_ptr<sycl::queue> m_syclQueue;
+        std::optional<SequentialState> m_sequentialState;
+        std::optional<ParallelState> m_parallelState;
+        std::optional<sycl::queue> m_syclQueue;
 
         bool m_cpuOnly{false};
 };

@@ -51,7 +51,7 @@ class ParallelState {
         explicit ParallelState(const Magnum::Range3D& worldBounds,
                                const std::vector<Actor>& actors,
                                size_t numAllVertices,
-                               sycl::queue* queue);
+                               const sycl::queue& queue);
 
         /// Copy and assignment explicitly deleted
         ///@{
