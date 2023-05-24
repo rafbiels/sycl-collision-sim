@@ -57,13 +57,15 @@ constexpr static float DefaultDensity{1000.0f * Units::Density}; // kg/cm^3, app
 constexpr static float EarthGravity{-9.81f * Units::Distance / (Units::Time * Units::Time)}; // m/s^2
 
 /// Restitution coefficient (fraction of kinematic energy conserved in a collision)
-constexpr static float RestitutionCoefficient{0.95f};
+constexpr static float RestitutionCoefficient{0.98f};
 
 /// Look-up table binomial coefficient of n^2 for small numbers
 template<size_t n>
 consteval size_t binomialCoefficientOfSquare() {
-    static_assert(n<13);
-    std::array<size_t,13> lut{{0, 0, 6, 36, 120, 300, 630, 1176, 2016, 3240, 4950, 7260, 10296}};
+    static_assert(n<21);
+    std::array<size_t,21> lut{{0, 0, 6, 36, 120, 300, 630, 1176, 2016, 3240,
+                               4950, 7260, 10296, 14196, 19110, 25200, 32640,
+                               41616, 52326, 64980, 79800}};
     return lut[n];
 }
 
