@@ -430,14 +430,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
-        // Start copying back to host data needed there which won't change beyond this point
-        std::vector<sycl::event> d2hCopyEvents{
-            state->linearVelocity.copyToHost(actorKernelEvent),
-            state->angularVelocity.copyToHost(actorKernelEvent),
-            state->translation.copyToHost(actorKernelEvent),
-            state->rotation.copyToHost(actorKernelEvent),
-        };
-
         // Update vertex positions and calculate world collisions
         sycl::event vertexKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(actorKernelEvent);
@@ -488,13 +480,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
-        // Start copying back to host data needed there which won't change beyond this point
-        d2hCopyEvents.insert(d2hCopyEvents.end(), {
-            state->wallCollisions.copyToHost(vertexKernelEvent),
-            state->addLinearVelocity.copyToHost(vertexKernelEvent),
-            state->addAngularVelocity.copyToHost(vertexKernelEvent),
-        });
-
         // Calculate the axis-align bounding boxes for each actor
         sycl::event aabbKernelEvent = queue->submit([&](sycl::handler& cgh){
             cgh.depends_on(vertexKernelEvent);
@@ -514,12 +499,25 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
+        // Start copying back to host data needed there which won't change beyond this point
+        std::vector<sycl::event> d2hCopyEvents{
+            state->linearVelocity.copyToHost(actorKernelEvent),
+            state->angularVelocity.copyToHost(actorKernelEvent),
+            state->translation.copyToHost(actorKernelEvent),
+            state->rotation.copyToHost(actorKernelEvent),
+            state->wallCollisions.copyToHost(vertexKernelEvent),
+            state->addLinearVelocity.copyToHost(vertexKernelEvent),
+            state->addAngularVelocity.copyToHost(vertexKernelEvent),
+        };
+
         // Sort the AABB edges using odd-even merge-sort
         std::optional<sycl::event> aabbSortKernelEvent;
         for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
             aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
                 if (aabbSortKernelEvent.has_value()) {
                     cgh.depends_on(aabbSortKernelEvent.value());
+                } else {
+                    cgh.depends_on(aabbKernelEvent);
                 }
                 cgh.parallel_for<class aabb_sort_kernel>(Constants::NumActors, [=](sycl::id<1> id){
                     auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {

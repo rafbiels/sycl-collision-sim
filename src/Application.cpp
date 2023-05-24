@@ -53,7 +53,7 @@ m_syclQueue{nullptr}
         m_sequentialState = std::make_unique<SequentialState>(m_world.boundaries());
     } else {
         try {
-            m_syclQueue = std::make_unique<sycl::queue>(sycl::default_selector_v, sycl::property::queue::in_order{});
+            m_syclQueue = std::make_unique<sycl::queue>();
             m_parallelState = std::make_unique<ParallelState>(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.get());
             Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
             // Copy initial data to the device
