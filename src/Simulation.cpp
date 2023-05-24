@@ -511,36 +511,36 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
         };
 
         // Sort the AABB edges using odd-even merge-sort
-        std::optional<sycl::event> aabbSortKernelEvent;
-        for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
-            aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
-                if (aabbSortKernelEvent.has_value()) {
-                    cgh.depends_on(aabbSortKernelEvent.value());
-                } else {
-                    cgh.depends_on(aabbKernelEvent);
-                }
-                cgh.parallel_for<class aabb_sort_kernel>(Constants::NumActors, [=](sycl::id<1> id){
-                    auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
-                        return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
-                    };
-                    auto edgeGreater = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
-                        return edgeValue(axis, edgeA) > edgeValue(axis, edgeB);
-                    };
-                    auto compareExchange = [aabb, &edgeGreater](unsigned int axis, Edge& edgeA, Edge& edgeB) constexpr -> void {
-                        if (edgeGreater(axis,edgeA,edgeB)) {std::swap(edgeA, edgeB);}
-                    };
+        // Given the small size of the problem we can avoid submitting N(=2*NumActors) kernels.
+        // Instead, we can submit one kernel with a single work-group and exploit a work-group barrier.
+        // This requires that N is smaller than the maximum work-group size of the GPU we're using.
+        sycl::event aabbSortKernelEvent = queue->submit([&](sycl::handler& cgh){
+            cgh.depends_on(aabbKernelEvent);
+            cgh.parallel_for<class aabb_sort_kernel>(sycl::nd_range<1>{Constants::NumActors, Constants::NumActors}, [=](sycl::nd_item<1> item){
+                auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
+                    return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
+                };
+                auto edgeGreater = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
+                    return edgeValue(axis, edgeA) > edgeValue(axis, edgeB);
+                };
+                auto compareExchange = [aabb, &edgeGreater](unsigned int axis, Edge& edgeA, Edge& edgeB) constexpr -> void {
+                    if (edgeGreater(axis,edgeA,edgeB)) {std::swap(edgeA, edgeB);}
+                };
+                size_t id = item.get_global_linear_id();
+                for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
                     size_t i = id * 2 + step%2;
                     if ((i+1) >= (2*Constants::NumActors)) {return;}
                     compareExchange(0, sortedAABBEdges[0][i], sortedAABBEdges[0][i+1]);
                     compareExchange(1, sortedAABBEdges[1][i], sortedAABBEdges[1][i+1]);
                     compareExchange(2, sortedAABBEdges[2][i], sortedAABBEdges[2][i+1]);
-                });
+                    sycl::group_barrier(item.get_group());
+                }
             });
-        }
+        });
 
         // Find overlapping AABB pairs
         sycl::event aabbOverlapKernelEvent = queue->submit([&](sycl::handler& cgh){
-            cgh.depends_on(aabbSortKernelEvent.value());
+            cgh.depends_on(aabbSortKernelEvent);
             cgh.parallel_for<class aabb_overlap_kernel>(Constants::NumActorPairs, [=](sycl::id<1> id){
                 size_t iActorA{Constants::ActorPairs[id].first};
                 size_t iActorB{Constants::ActorPairs[id].second};
