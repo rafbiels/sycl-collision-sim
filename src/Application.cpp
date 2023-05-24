@@ -201,11 +201,12 @@ void CollisionSim::Application::createActors() {
     auto generator = [](size_t index){
         size_t mod = index % 4;
         switch (mod) {
-            case 0: return CollisionSim::ActorFactory::cube(0.7); break;
-            case 1: return CollisionSim::ActorFactory::sphere(1.0); break;
-            case 2: return CollisionSim::ActorFactory::cylinder(0.8); break;
-            case 3: return CollisionSim::ActorFactory::cone(0.9); break;
-            default: return CollisionSim::ActorFactory::cube(0.7); break;
+            constexpr static float actorScale{std::min(1.5f,6.0f/static_cast<float>(Constants::SqrtNumActors))};
+            case 0: return CollisionSim::ActorFactory::cube(0.7*actorScale); break;
+            case 1: return CollisionSim::ActorFactory::sphere(1.0*actorScale); break;
+            case 2: return CollisionSim::ActorFactory::cylinder(0.8*actorScale); break;
+            case 3: return CollisionSim::ActorFactory::cone(0.9*actorScale); break;
+            default: return CollisionSim::ActorFactory::cube(0.7*actorScale); break;
         }
     };
     m_actors.reserve(gridSideN*gridSideN);
