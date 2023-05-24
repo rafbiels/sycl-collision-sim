@@ -499,17 +499,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
             });
         });
 
-        // Start copying back to host data needed there which won't change beyond this point
-        std::vector<sycl::event> d2hCopyEvents{
-            state->linearVelocity.copyToHost(actorKernelEvent),
-            state->angularVelocity.copyToHost(actorKernelEvent),
-            state->translation.copyToHost(actorKernelEvent),
-            state->rotation.copyToHost(actorKernelEvent),
-            state->wallCollisions.copyToHost(vertexKernelEvent),
-            state->addLinearVelocity.copyToHost(vertexKernelEvent),
-            state->addAngularVelocity.copyToHost(vertexKernelEvent),
-        };
-
         // Sort the AABB edges using odd-even merge-sort
         // Given the small size of the problem we can avoid submitting N(=2*NumActors) kernels.
         // Instead, we can submit one kernel with a single work-group and exploit a work-group barrier.
@@ -537,6 +526,17 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
                 }
             });
         });
+
+        // Start copying back to host data needed there which won't change beyond this point
+        std::vector<sycl::event> d2hCopyEvents{
+            state->linearVelocity.copyToHost(actorKernelEvent),
+            state->angularVelocity.copyToHost(actorKernelEvent),
+            state->translation.copyToHost(actorKernelEvent),
+            state->rotation.copyToHost(actorKernelEvent),
+            state->wallCollisions.copyToHost(vertexKernelEvent),
+            state->addLinearVelocity.copyToHost(vertexKernelEvent),
+            state->addAngularVelocity.copyToHost(vertexKernelEvent),
+        };
 
         // Find overlapping AABB pairs
         sycl::event aabbOverlapKernelEvent = queue->submit([&](sycl::handler& cgh){
@@ -571,6 +571,10 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState* st
                 );
             });
         });
+
+        // FIXME: Force synchronisation after aabbOverlapKernelEvent for now, which will be
+        // replaced with real dependency on d2h copy of the narrow-phase collision output
+        d2hCopyEvents.push_back(aabbOverlapKernelEvent);
 
         // Wait for all the device-to-host memory copies to finish
         sycl::event::wait_and_throw(d2hCopyEvents);
