@@ -31,7 +31,7 @@ constexpr static size_t FrameTimeCounterWindow{2048};
 constexpr static float RealTimeScale{0.2f};
 
 /// Simulation size given by the square root of the number of actors
-constexpr static size_t SqrtNumActors{3};
+constexpr static size_t SqrtNumActors{ACTOR_GRID_SIZE};
 
 /// Number of actors
 constexpr static size_t NumActors{SqrtNumActors*SqrtNumActors};
