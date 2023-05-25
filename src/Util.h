@@ -232,7 +232,7 @@ struct ClosestPointOnTriangleReturnValue {
 /// Returns the closest point P and distance d as {Px, Py, Pz, d}
 ClosestPointOnTriangleReturnValue closestPointOnTriangle(
     const std::array<sycl::float3,3>& triangle,
-    const std::array<std::vector<float>,3>& vertices);
+    const std::vector<Magnum::Vector3>& vertices);
 
 } // namespace CollisionSim::Util
 

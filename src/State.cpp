@@ -20,12 +20,8 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
   bodyInertiaInv{queue},
   numVertices{queue},
   verticesOffset{queue},
-  bodyVertices{USMData<float>{queue, numAllVertices},
-               USMData<float>{queue, numAllVertices},
-               USMData<float>{queue, numAllVertices}},
-  worldVertices{USMData<float>{queue, numAllVertices},
-                USMData<float>{queue, numAllVertices},
-                USMData<float>{queue, numAllVertices}},
+  bodyVertices{queue, numAllVertices},
+  worldVertices{queue, numAllVertices},
   translation{queue},
   rotation{queue},
   inertiaInv{queue},
@@ -58,9 +54,11 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
 
     size_t vertexOffset{0};
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
+        const size_t numVerticesThisActor{actors[iActor].numVertices()};
+        maxNumVerticesPerActor = std::max(maxNumVerticesPerActor, numVerticesThisActor);
         mass.hostContainer[iActor] = actors[iActor].mass();
         bodyInertiaInv.hostContainer[iActor] = Util::toSycl(actors[iActor].bodyInertiaInv());
-        numVertices.hostContainer[iActor] = static_cast<uint16_t>(actors[iActor].numVertices());
+        numVertices.hostContainer[iActor] = static_cast<uint16_t>(numVerticesThisActor);
         verticesOffset.hostContainer[iActor] = vertexOffset;
         translation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().translation());
         rotation.hostContainer[iActor] = Util::toSycl(actors[iActor].transformation_const().rotationScaling());
@@ -73,11 +71,9 @@ CollisionSim::ParallelState::ParallelState(const Magnum::Range3D& worldBounds,
         torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
 
         const auto& actorBodyVertices = actors[iActor].vertexPositions();
-        const size_t numVerticesThisActor{actorBodyVertices[0].size()};
         std::fill(actorIndices.hostContainer.begin()+vertexOffset, actorIndices.hostContainer.begin()+vertexOffset+numVerticesThisActor, iActor);
-        std::copy(actorBodyVertices[0].begin(), actorBodyVertices[0].end(), bodyVertices[0].hostContainer.begin()+vertexOffset);
-        std::copy(actorBodyVertices[1].begin(), actorBodyVertices[1].end(), bodyVertices[1].hostContainer.begin()+vertexOffset);
-        std::copy(actorBodyVertices[2].begin(), actorBodyVertices[2].end(), bodyVertices[2].hostContainer.begin()+vertexOffset);
+        std::transform(actorBodyVertices.begin(), actorBodyVertices.end(), bodyVertices.hostContainer.begin()+vertexOffset,
+                       [](const Magnum::Vector3& v) -> sycl::float3 {return Util::toSycl(v);});
         // Note: world vertices are left uninitialised as they are only calculated on the device
         vertexOffset += numVerticesThisActor;
     }
@@ -91,12 +87,8 @@ void CollisionSim::ParallelState::copyAllToDeviceAsync() const {
     bodyInertiaInv.copyToDevice();
     numVertices.copyToDevice();
     verticesOffset.copyToDevice();
-    bodyVertices[0].copyToDevice();
-    bodyVertices[1].copyToDevice();
-    bodyVertices[2].copyToDevice();
-    worldVertices[0].copyToDevice();
-    worldVertices[1].copyToDevice();
-    worldVertices[2].copyToDevice();
+    bodyVertices.copyToDevice();
+    worldVertices.copyToDevice();
     translation.copyToDevice();
     rotation.copyToDevice();
     inertiaInv.copyToDevice();

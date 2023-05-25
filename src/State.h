@@ -65,6 +65,7 @@ class ParallelState {
         void copyAllToDeviceAsync() const;
 
         size_t numAllVertices{0};
+        size_t maxNumVerticesPerActor{0};
 
         /// Constants
         ///@{
@@ -74,12 +75,12 @@ class ParallelState {
         USMData<float3x3,Constants::NumActors> bodyInertiaInv;
         USMData<uint16_t,Constants::NumActors> numVertices; // Caution: restricting N vertices per actor to 65536
         USMData<unsigned int,Constants::NumActors> verticesOffset;
-        std::array<USMData<float>,3> bodyVertices;
+        USMData<sycl::float3> bodyVertices;
         ///@}
 
         /// Motion simulation variables
         ///@{
-        std::array<USMData<float>,3> worldVertices;
+        USMData<sycl::float3> worldVertices;
         USMData<sycl::float3,Constants::NumActors> translation;
         USMData<float3x3,Constants::NumActors> rotation;
         USMData<float3x3,Constants::NumActors> inertiaInv;

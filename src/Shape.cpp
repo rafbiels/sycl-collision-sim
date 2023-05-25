@@ -12,18 +12,11 @@
 CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
 : m_meshData{std::move(meshData)},
   m_mesh{Magnum::MeshTools::compile(m_meshData)} {
-    auto vertices = Shape::meshData().positions3DAsArray();
+    const auto& vertices{m_meshData.positions3DAsArray()};
     m_numVertices = vertices.size();
-    m_vertexPositions[0].reserve(vertices.size());
-    m_vertexPositions[1].reserve(vertices.size());
-    m_vertexPositions[2].reserve(vertices.size());
-    for (const auto& vertex : vertices) {
-        m_vertexPositions[0].push_back(vertex[0]);
-        m_vertexPositions[1].push_back(vertex[1]);
-        m_vertexPositions[2].push_back(vertex[2]);
-    }
-    m_vertexPositionsWorld = m_vertexPositions;
-}
+    m_vertexPositions = std::vector<Magnum::Vector3>(vertices.begin(), vertices.end());
+    m_vertexPositionsWorld = std::vector<Magnum::Vector3>(vertices.begin(), vertices.end());
+  }
 
 // -----------------------------------------------------------------------------
 Magnum::GL::Mesh& CollisionSim::Shape::mesh() {
@@ -66,17 +59,17 @@ size_t CollisionSim::Shape::numVertices() const {
 }
 
 // -----------------------------------------------------------------------------
-const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositions() const {
+const std::vector<Magnum::Vector3>& CollisionSim::Shape::vertexPositions() const {
     return m_vertexPositions;
 }
 
 // -----------------------------------------------------------------------------
-const std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorld() const {
+const std::vector<Magnum::Vector3>& CollisionSim::Shape::vertexPositionsWorld() const {
     return m_vertexPositionsWorld;
 }
 
 // -----------------------------------------------------------------------------
-std::array<std::vector<float>,3>& CollisionSim::Shape::vertexPositionsWorld_nonconst() {
+std::vector<Magnum::Vector3>& CollisionSim::Shape::vertexPositionsWorld_nonconst() {
     return m_vertexPositionsWorld;
 }
 
@@ -91,15 +84,15 @@ void CollisionSim::Shape::updateVertexPositions() {
         Magnum::Vector3{std::numeric_limits<float>::max()},
         Magnum::Vector3{std::numeric_limits<float>::lowest()}
     };
-    for (size_t iVertex{0}; iVertex<m_vertexPositions[0].size(); ++iVertex) {
+    for (size_t iVertex{0}; iVertex<m_vertexPositions.size(); ++iVertex) {
         for (size_t axis{0}; axis<3; ++axis) {
-            m_vertexPositionsWorld[axis][iVertex] =
-                m_transformation[0][axis]*m_vertexPositions[0][iVertex] +
-                m_transformation[1][axis]*m_vertexPositions[1][iVertex] +
-                m_transformation[2][axis]*m_vertexPositions[2][iVertex] +
+            m_vertexPositionsWorld[iVertex][axis] =
+                m_transformation[0][axis]*m_vertexPositions[iVertex][0] +
+                m_transformation[1][axis]*m_vertexPositions[iVertex][1] +
+                m_transformation[2][axis]*m_vertexPositions[iVertex][2] +
                 m_transformation[3][axis];
-            m_aabb.min()[axis] = std::min(m_aabb.min()[axis], m_vertexPositionsWorld[axis][iVertex]);
-            m_aabb.max()[axis] = std::max(m_aabb.max()[axis], m_vertexPositionsWorld[axis][iVertex]);
+            m_aabb.min()[axis] = std::min(m_aabb.min()[axis], m_vertexPositionsWorld[iVertex][axis]);
+            m_aabb.max()[axis] = std::max(m_aabb.max()[axis], m_vertexPositionsWorld[iVertex][axis]);
         }
     }
 }

@@ -70,38 +70,39 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
         const Magnum::Vector3& max{worldBoundaries.max()};
         Magnum::Vector3 normal{0.0f, 0.0f, 0.0f};
 
-        for (size_t iVertex{0}; iVertex < vertices[0].size(); ++iVertex) {
-            if (vertices[0][iVertex] <= min[0]) {
+        for (size_t iVertex{0}; iVertex < vertices.size(); ++iVertex) {
+            const Magnum::Vector3& vertex{vertices[iVertex]};
+            if (vertex[0] <= min[0]) {
                 collision=Wall::Xmin;
                 collidingVertexIndex = iVertex;
                 normal[0] = 1.0;
                 break;
             }
-            if (vertices[0][iVertex] >= max[0]) {
+            if (vertex[0] >= max[0]) {
                 collision=Wall::Xmax;
                 collidingVertexIndex = iVertex;
                 normal[0] = -1.0;
                 break;
             }
-            if (vertices[1][iVertex] <= min[1]) {
+            if (vertex[1] <= min[1]) {
                 collision=Wall::Ymin;
                 collidingVertexIndex = iVertex;
                 normal[1] = 1.0;
                 break;
             }
-            if (vertices[1][iVertex] >= max[1]) {
+            if (vertex[1] >= max[1]) {
                 collision=Wall::Ymax;
                 collidingVertexIndex = iVertex;
                 normal[1] = -1.0;
                 break;
             }
-            if (vertices[2][iVertex] <= min[2]) {
+            if (vertex[2] <= min[2]) {
                 collision=Wall::Zmin;
                 collidingVertexIndex = iVertex;
                 normal[2] = 1.0;
                 break;
             }
-            if (vertices[2][iVertex] >= max[2]) {
+            if (vertex[2] >= max[2]) {
                 collision=Wall::Zmax;
                 collidingVertexIndex = iVertex;
                 normal[2] = -1.0;
@@ -113,11 +114,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
             continue;
         }
 
-        const Magnum::Vector3 collidingVertexWorld{
-            actor.vertexPositionsWorld()[0][collidingVertexIndex],
-            actor.vertexPositionsWorld()[1][collidingVertexIndex],
-            actor.vertexPositionsWorld()[2][collidingVertexIndex]
-        };
+        const Magnum::Vector3& collidingVertexWorld{vertices[collidingVertexIndex]};
 
         const Magnum::Vector3 radius = collidingVertexWorld - actor.transformation().translation();
         const auto a = Magnum::Math::cross(radius, normal);
@@ -219,9 +216,9 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState& state)
         bool bestTriangleFromA{false};
         float smallestDistanceSquared{std::numeric_limits<float>::max()};
         for (size_t j{0}; j<nTrianglesB; ++j) {
-            sycl::float3 A{verticesB[0][indicesB[3*j]], verticesB[1][indicesB[3*j]], verticesB[2][indicesB[3*j]]};
-            sycl::float3 B{verticesB[0][indicesB[3*j+1]], verticesB[1][indicesB[3*j+1]], verticesB[2][indicesB[3*j+1]]};
-            sycl::float3 C{verticesB[0][indicesB[3*j+2]], verticesB[1][indicesB[3*j+2]], verticesB[2][indicesB[3*j+2]]};
+            sycl::float3 A{Util::toSycl(verticesB[indicesB[3*j]])};
+            sycl::float3 B{Util::toSycl(verticesB[indicesB[3*j+1]])};
+            sycl::float3 C{Util::toSycl(verticesB[indicesB[3*j+2]])};
 
             // Skip degenerate triangles
             if (Util::equal(A,B) || Util::equal(B,C)) {continue;}
@@ -240,9 +237,9 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState& state)
             }
         }
         for (size_t j{0}; j<nTrianglesA; ++j) {
-            sycl::float3 A{verticesA[0][indicesA[3*j]], verticesA[1][indicesA[3*j]], verticesA[2][indicesA[3*j]]};
-            sycl::float3 B{verticesA[0][indicesA[3*j+1]], verticesA[1][indicesA[3*j+1]], verticesA[2][indicesA[3*j+1]]};
-            sycl::float3 C{verticesA[0][indicesA[3*j+2]], verticesA[1][indicesA[3*j+2]], verticesA[2][indicesA[3*j+2]]};
+            sycl::float3 A{Util::toSycl(verticesA[indicesA[3*j]])};
+            sycl::float3 B{Util::toSycl(verticesA[indicesA[3*j+1]])};
+            sycl::float3 C{Util::toSycl(verticesA[indicesA[3*j+2]])};
 
             // Skip degenerate triangles
             if (Util::equal(A,B) || Util::equal(B,C)) {continue;}
@@ -367,16 +364,8 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         float3x3* bodyInertiaInv = state.bodyInertiaInv.devicePointer;
         uint16_t* numVertices = state.numVertices.devicePointer;
         uint32_t* verticesOffset = state.verticesOffset.devicePointer;
-        std::array<float*,3> bodyVertices = {
-            state.bodyVertices[0].devicePointer,
-            state.bodyVertices[1].devicePointer,
-            state.bodyVertices[2].devicePointer
-        };
-        std::array<float*,3> worldVertices = {
-            state.worldVertices[0].devicePointer,
-            state.worldVertices[1].devicePointer,
-            state.worldVertices[2].devicePointer
-        };
+        sycl::float3* bodyVertices = state.bodyVertices.devicePointer;
+        sycl::float3* worldVertices = state.worldVertices.devicePointer;
         sycl::float3* angularVelocity = state.angularVelocity.devicePointer;
         float3x3* rotation = state.rotation.devicePointer;
         sycl::float3* force = state.force.devicePointer;
@@ -436,35 +425,34 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             cgh.parallel_for<class vertex_kernel>(state.numAllVertices, [=](sycl::id<1> id){
                 uint16_t iActor = actorIndices[id];
 
-                // sycl::float3 vertex{
-                worldVertices[0][id] =
-                    rotation[iActor][0][0]*bodyVertices[0][id] +
-                    rotation[iActor][1][0]*bodyVertices[1][id] +
-                    rotation[iActor][2][0]*bodyVertices[2][id] +
-                    translation[iActor][0];
-                worldVertices[1][id] =
-                    rotation[iActor][0][1]*bodyVertices[0][id] +
-                    rotation[iActor][1][1]*bodyVertices[1][id] +
-                    rotation[iActor][2][1]*bodyVertices[2][id] +
-                    translation[iActor][1];
-                worldVertices[2][id] =
-                    rotation[iActor][0][2]*bodyVertices[0][id] +
-                    rotation[iActor][1][2]*bodyVertices[1][id] +
-                    rotation[iActor][2][2]*bodyVertices[2][id] +
-                    translation[iActor][2];
-                // };
-                sycl::float3 vertex{worldVertices[0][id], worldVertices[1][id], worldVertices[2][id]};
+                worldVertices[id] = sycl::float3{
+                    // x
+                    rotation[iActor][0][0]*bodyVertices[id][0] +
+                    rotation[iActor][1][0]*bodyVertices[id][1] +
+                    rotation[iActor][2][0]*bodyVertices[id][2] +
+                    translation[iActor][0],
+                    // y
+                    rotation[iActor][0][1]*bodyVertices[id][0] +
+                    rotation[iActor][1][1]*bodyVertices[id][1] +
+                    rotation[iActor][2][1]*bodyVertices[id][2] +
+                    translation[iActor][1],
+                    // z
+                    rotation[iActor][0][2]*bodyVertices[id][0] +
+                    rotation[iActor][1][2]*bodyVertices[id][1] +
+                    rotation[iActor][2][2]*bodyVertices[id][2] +
+                    translation[iActor][2]
+                };
 
                 Wall collision{Wall::None};
-                collision |= (static_cast<WallUnderlyingType>(vertex[0] <= worldBoundaries[0]) << 0);
-                collision |= (static_cast<WallUnderlyingType>(vertex[0] >= worldBoundaries[1]) << 1);
-                collision |= (static_cast<WallUnderlyingType>(vertex[1] <= worldBoundaries[2]) << 2);
-                collision |= (static_cast<WallUnderlyingType>(vertex[1] >= worldBoundaries[3]) << 3);
-                collision |= (static_cast<WallUnderlyingType>(vertex[2] <= worldBoundaries[4]) << 4);
-                collision |= (static_cast<WallUnderlyingType>(vertex[2] >= worldBoundaries[5]) << 5);
+                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][0] <= worldBoundaries[0]) << 0);
+                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][0] >= worldBoundaries[1]) << 1);
+                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][1] <= worldBoundaries[2]) << 2);
+                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][1] >= worldBoundaries[3]) << 3);
+                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][2] <= worldBoundaries[4]) << 4);
+                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][2] >= worldBoundaries[5]) << 5);
 
                 sycl::float3 normal = wallNormal(collision);
-                sycl::float3 radius{vertex - translation[iActor]};
+                sycl::float3 radius{worldVertices[id] - translation[iActor]};
                 sycl::float3 a{sycl::cross(radius, normal)};
                 sycl::float3 b{Util::mvmul(inertiaInv[iActor], a)};
                 sycl::float3 c{sycl::cross(b, radius)};
@@ -483,20 +471,46 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         });
 
         // Calculate the axis-align bounding boxes for each actor
+        // The use of sycl::joint_reduce requires 1D arrays of vx, vy, vz
+        // so we copy the AoS global memory vertices into local memory SoA
         sycl::event aabbKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(vertexKernelEvent);
             constexpr static size_t aabbWorkGroupSize{32};
             const sycl::nd_range<1> aabbRange{Constants::NumActors*aabbWorkGroupSize,aabbWorkGroupSize};
+            std::array localVertices{
+                sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
+                sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
+                sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh}};
             cgh.parallel_for<class aabb_kernel>(aabbRange, [=](sycl::nd_item<1> it){
+                size_t iActor = it.get_group_linear_id();
+
+                sycl::float3* actorVertices = worldVertices + verticesOffset[iActor];
+                size_t numVerticesPerThread{1 + numVertices[iActor]/aabbWorkGroupSize};
+                for (size_t i{0}; i<numVerticesPerThread; ++i) {
+                    size_t iVertex{it.get_local_linear_id() * numVerticesPerThread + i};
+                    if (iVertex<numVertices[iActor]) {
+                        localVertices[0][iVertex] = actorVertices[iVertex][0];
+                        localVertices[1][iVertex] = actorVertices[iVertex][1];
+                        localVertices[2][iVertex] = actorVertices[iVertex][2];
+                    }
+                }
+
+                sycl::group_barrier(it.get_group());
+
                 #pragma unroll
-                for (size_t axis{0}; axis<3; ++axis) {
-                    size_t iActor = it.get_group_linear_id();
-                    float* begin = worldVertices[axis] + verticesOffset[iActor];
-                    float* end = begin + numVertices[iActor];
-                    float min = sycl::joint_reduce(it.get_group(), begin, end, sycl::minimum{});
-                    float max = sycl::joint_reduce(it.get_group(), begin, end, sycl::maximum{});
-                    aabb[axis][iActor][0] = min;
-                    aabb[axis][iActor][1] = max;
+                for (unsigned int axis{0}; axis<3; ++axis) {
+                    aabb[axis][iActor] = sycl::float2{
+                        sycl::joint_reduce(
+                            it.get_group(),
+                            localVertices[axis].begin(),
+                            localVertices[axis].begin()+numVertices[iActor],
+                            sycl::minimum{}),
+                        sycl::joint_reduce(
+                            it.get_group(),
+                            localVertices[axis].begin(),
+                            localVertices[axis].begin()+numVertices[iActor],
+                            sycl::maximum{})
+                    };
                 }
             });
         });

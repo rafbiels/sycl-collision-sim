@@ -133,7 +133,7 @@ void orthonormaliseRotation(Magnum::Matrix4 &trfMatrix) {
 }
 
 // -----------------------------------------------------------------------------
-ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const std::array<std::vector<float>,3>& vertices) {
+ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const std::vector<Magnum::Vector3>& vertices) {
     // ===========================================
     // "2D Method" following M.W. Jones 1995
     // 3D Distance from a Point to a Triangle
@@ -183,8 +183,8 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     sycl::float3 bestPointOnTriangle{0.0f, 0.0f, 0.0f};
     size_t bestVertexIndex{std::numeric_limits<size_t>::max()};
 
-    for (size_t iVertex{0}; iVertex<vertices[0].size(); ++iVertex) {
-        sycl::float3 P{vertices[0][iVertex], vertices[1][iVertex], vertices[2][iVertex]};
+    for (size_t iVertex{0}; iVertex<vertices.size(); ++iVertex) {
+        sycl::float3 P{Util::toSycl(vertices[iVertex])};
         P -= triangle[0];
         P = mvmul(rotZ, mvmul(rotY, mvmul(rotX, P)));
 

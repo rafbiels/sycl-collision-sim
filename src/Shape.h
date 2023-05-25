@@ -19,7 +19,6 @@
 namespace CollisionSim {
 class Shape {
     public:
-        Shape();
         Shape(Magnum::Trade::MeshData&& mesh);
 
         Magnum::GL::Mesh& mesh();
@@ -35,13 +34,13 @@ class Shape {
         size_t numVertices() const;
 
         /// Returns SoA vertex positions in body coordinate system
-        const std::array<std::vector<float>,3>& vertexPositions() const;
+        const std::vector<Magnum::Vector3>& vertexPositions() const;
 
         /// Returns SoA vertex positions in world coordinate system
-        const std::array<std::vector<float>,3>& vertexPositionsWorld() const;
+        const std::vector<Magnum::Vector3>& vertexPositionsWorld() const;
 
         /// Returns SoA vertex positions in world coordinate system
-        std::array<std::vector<float>,3>& vertexPositionsWorld_nonconst();
+        std::vector<Magnum::Vector3>& vertexPositionsWorld_nonconst();
 
         /// Return the bounding box in world coordinate system
         const Magnum::Range3D& axisAlignedBoundingBox() const;
@@ -55,9 +54,9 @@ class Shape {
         Magnum::Matrix4 m_transformation;
         Magnum::Color3 m_colour{0.5f,0.5f,0.5f};
         /// SoA vertex data in body coordinate system
-        std::array<std::vector<float>,3> m_vertexPositions{};
+        std::vector<Magnum::Vector3> m_vertexPositions{};
         /// SoA vertex data in world coordinate system
-        std::array<std::vector<float>,3> m_vertexPositionsWorld{};
+        std::vector<Magnum::Vector3> m_vertexPositionsWorld{};
         /// Axis-aligned bounding box recalculated together with m_vertexPositionsWorld
         Magnum::Range3D m_aabb;
         /// Constant number of vertices, calculated at construction
