@@ -19,10 +19,17 @@
 
 // -----------------------------------------------------------------------------
 CollisionSim::Application::Application(const Arguments& arguments)
-: Magnum::Platform::Application{
+:
+#if HEADLESS
+Magnum::Platform::WindowlessGlxApplication{
+    arguments,
+    Configuration{}.setFlags(Configuration::Flag::QuietLog)},
+#else
+Magnum::Platform::Application{
     arguments,
     Configuration{}.setTitle(Constants::ApplicationName),
     GLConfiguration{}.setFlags(GLConfiguration::Flag::QuietLog)},
+#endif
 m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDimensions},
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
@@ -30,14 +37,15 @@ m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFPSLongAvgSec{65536},
 m_computeTask{[this]{compute();}}
 {
+    #if !HEADLESS
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::FaceCulling);
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::Blending);
     Magnum::GL::Renderer::setBlendFunction(Magnum::GL::Renderer::BlendFunction::One, Magnum::GL::Renderer::BlendFunction::OneMinusSourceAlpha);
     Magnum::GL::Renderer::setBlendEquation(Magnum::GL::Renderer::BlendEquation::Add, Magnum::GL::Renderer::BlendEquation::Add);
-
     setMinimalLoopPeriod(0);
     if (swapInterval()!=0) {setSwapInterval(0);}
+    #endif
 
     for (int iArg{0}; iArg<arguments.argc; ++iArg) {
         if (std::string{arguments.argv[iArg]}=="--cpu") {
@@ -87,6 +95,7 @@ CollisionSim::Application::~Application() {
     Corrade::Utility::Debug{} << "Average compute FPS: " << m_computeFPSLongAvgSec.value();
 }
 
+#if !HEADLESS
 // -----------------------------------------------------------------------------
 void CollisionSim::Application::tickEvent() {
     using namespace Magnum::Math::Literals;
@@ -107,7 +116,7 @@ void CollisionSim::Application::tickEvent() {
         m_computeFPSLongAvgSec.add(cfps);
         m_textRenderer.get("cfps").renderer().render(Corrade::Utility::formatString("Compute FPS: {:.1f}", cfps));
         m_textRenderer.get("rfps").renderer().render(Corrade::Utility::formatString("Render FPS: {:.1f}", 1.0/m_renderFrameTimeSec.value()));
-        m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Time: {:.1f}s", wallTimeSec));
+        m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Sim time: {:.1f}s", wallTimeSec));
         m_renderFrameTimeSec.reset();
     }
 }
@@ -147,6 +156,31 @@ void CollisionSim::Application::drawEvent() {
     redraw();
     swapBuffers();
 }
+#else
+// -----------------------------------------------------------------------------
+int CollisionSim::Application::exec() {
+    Util::RepeatTask printStatus{[&]{
+    using FloatSecond = std::chrono::duration<float,std::ratio<1>>;
+    float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
+
+    if (m_textUpdateTimer.stepIfElapsed(Constants::TextUpdateInterval)) {
+        float cfps{0.0f};
+        {
+            std::scoped_lock lock{m_computeFrameTimeSecMutex};
+            cfps = 1.0f/m_computeFrameTimeSec.value();
+            m_computeFrameTimeSec.reset();
+        }
+        m_computeFPSLongAvgSec.add(cfps);
+        Corrade::Utility::Debug{} << Corrade::Utility::format("Compute FPS: {:.1f}", cfps);
+        Corrade::Utility::Debug{} << Corrade::Utility::format("Sim time: {:.1f}s", wallTimeSec);
+    }
+    }};
+    printStatus.start(std::chrono::seconds{1});
+    std::this_thread::sleep_for(std::chrono::seconds{5});
+    printStatus.stop();
+    return 0;
+}
+#endif
 
 // -----------------------------------------------------------------------------
 void CollisionSim::Application::compute() {
@@ -222,4 +256,8 @@ void CollisionSim::Application::createActors() {
 }
 
 // -----------------------------------------------------------------------------
+#if HEADLESS
+MAGNUM_WINDOWLESSGLXAPPLICATION_MAIN(CollisionSim::Application)
+#else
 MAGNUM_APPLICATION_MAIN(CollisionSim::Application)
+#endif

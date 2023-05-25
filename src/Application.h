@@ -13,7 +13,11 @@
 #include "State.h"
 #include "World.h"
 
+#if HEADLESS
+#include <Magnum/Platform/WindowlessGlxApplication.h>
+#else
 #include <Magnum/Platform/Sdl2Application.h>
+#endif
 #include <Magnum/Shaders/PhongGL.h>
 #include <Corrade/Containers/Pointer.h>
 
@@ -23,14 +27,26 @@
 #include <mutex>
 
 namespace CollisionSim {
-class Application final : public Magnum::Platform::Application {
+#if HEADLESS
+class Application : public Magnum::Platform::WindowlessGlxApplication
+#else
+class Application final : public Magnum::Platform::Application
+#endif
+{
     public:
         explicit Application(const Arguments& arguments);
         virtual ~Application();
+        #if HEADLESS
+        int exec() override;
+        #endif
 
     private:
+        #if !HEADLESS
         void tickEvent() override;
         void drawEvent() override;
+        #else
+        constexpr Magnum::Vector2i windowSize() {return {800, 600};}
+        #endif
         void compute();
         void createActors();
 
