@@ -139,6 +139,7 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     // 3D Distance from a Point to a Triangle
     // http://www-compsci.swan.ac.uk/~csmark/PDFS/1995_3D_distance_point_to_triangle
     // ===========================================
+    using float3x3 = std::array<sycl::float3,3>;
     sycl::float3 A{0.0f};
     sycl::float3 B{triangle[1]-triangle[0]};
     sycl::float3 C{triangle[2]-triangle[0]};
@@ -147,7 +148,7 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     const float denomRotX = sycl::sqrt(B[1]*B[1]+B[2]*B[2]);
     const float sinRotX = denomRotX==0 ? 0.0f : std::copysign(B[1] / denomRotX, B[2]);
     const float cosRotX = denomRotX==0 ? 1.0f : std::copysign(B[2] / denomRotX, B[1]);
-    const std::array<sycl::float3,3> rotX = {
+    const float3x3 rotX = {
         sycl::float3{1.0f, 0.0f, 0.0f},
         sycl::float3{0.0f, cosRotX, sinRotX},
         sycl::float3{0.0f, -sinRotX, cosRotX}
@@ -159,7 +160,7 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     const float denomRotY = sycl::sqrt(B[0]*B[0]+B[2]*B[2]);
     const float sinRotY = denomRotY==0 ? 0.0f : std::copysign(B[0] / denomRotY, B[2]);
     const float cosRotY = denomRotY==0 ? 1.0f : std::copysign(B[2] / denomRotY, -B[0]);
-    const std::array<sycl::float3,3> rotY = {
+    const float3x3 rotY = {
         sycl::float3{cosRotY, 0.0f, -sinRotY},
         sycl::float3{0.0f, 1.0f, 0.0f},
         sycl::float3{sinRotY, 0.0f, cosRotY}
@@ -171,13 +172,31 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     const float denomRotZ = sycl::sqrt(C[0]*C[0]+C[1]*C[1]);
     const float sinRotZ = denomRotZ==0 ? 0.0f : std::copysign(C[0] / denomRotZ, C[0]);
     const float cosRotZ = denomRotZ==0 ? 1.0f : std::copysign(C[1] / denomRotZ, -C[1]);
-    const std::array<sycl::float3,3> rotZ = {
+    const float3x3 rotZ = {
         sycl::float3{cosRotZ, -sinRotZ, 0.0f},
         sycl::float3{sinRotZ, cosRotZ, 0.0f},
         sycl::float3{0.0f, 0.0f, 1.0f}
     };
     B = mvmul(rotZ, B);
     C = mvmul(rotZ, C);
+
+    float3x3 rot{
+        sycl::float3{
+            cosRotZ*cosRotY,
+            -sinRotZ*cosRotY,
+            -sinRotY
+        },
+        sycl::float3{
+            sinRotZ*cosRotX+cosRotZ*sinRotY*sinRotX,
+            cosRotZ*cosRotX-sinRotZ*sinRotY*sinRotX,
+            cosRotY*sinRotX
+        },
+        sycl::float3{
+            -sinRotZ*sinRotX+cosRotZ*sinRotY*cosRotX,
+            -cosRotZ*sinRotX-sinRotZ*sinRotY*cosRotX,
+            cosRotY*cosRotX
+        }
+    };
 
     float smallestDistanceSquared{std::numeric_limits<float>::max()};
     sycl::float3 bestPointOnTriangle{0.0f, 0.0f, 0.0f};
@@ -186,7 +205,7 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
     for (size_t iVertex{0}; iVertex<vertices.size(); ++iVertex) {
         sycl::float3 P{Util::toSycl(vertices[iVertex])};
         P -= triangle[0];
-        P = mvmul(rotZ, mvmul(rotY, mvmul(rotX, P)));
+        P = mvmul(rot,P);
 
         const float forceAnticlockwise = (-B[2]*C[1] < 0) ? -1.0f : 1.0f;
         const float edgeAB = forceAnticlockwise * P[1] * B[2];
@@ -275,24 +294,21 @@ ClosestPointOnTriangleReturnValue closestPointOnTriangle(const std::array<sycl::
         }
     }
 
-    const std::array<sycl::float3,3> negRotX = {
-        sycl::float3{1.0f, 0.0f, 0.0f},
-        sycl::float3{0.0f, cosRotX, -sinRotX},
-        sycl::float3{0.0f, sinRotX, cosRotX}
-    };
-    const std::array<sycl::float3,3> negRotY = {
-        sycl::float3{cosRotY, 0.0f, sinRotY},
-        sycl::float3{0.0f, 1.0f, 0.0f},
-        sycl::float3{-sinRotY, 0.0f, cosRotY}
-    };
-    const std::array<sycl::float3,3> negRotZ = {
-        sycl::float3{cosRotZ, sinRotZ, 0.0f},
-        sycl::float3{-sinRotZ, cosRotZ, 0.0f},
-        sycl::float3{0.0f, 0.0f, 1.0f}
-    };
-
     // Transform back to original coordinate system
-    bestPointOnTriangle = Util::mvmul(negRotX, Util::mvmul(negRotY, Util::mvmul(negRotZ, bestPointOnTriangle))) + triangle[0];
+    // Using rotation matrix R = Rx * Ry * Rz where each angle is the opposite of
+    // the previous transform (cos(-a)=cos(a), sin(-a)=-sin(a))
+    float3x3 negRot{
+        sycl::float3{cosRotY*cosRotZ,
+                     sinRotX*sinRotY*cosRotZ+cosRotX*sinRotZ,
+                     cosRotX*sinRotY*cosRotZ-sinRotX*sinRotZ},
+        sycl::float3{-cosRotY*sinRotZ,
+                     -sinRotX*sinRotY*sinRotZ+cosRotX*cosRotZ,
+                     -cosRotX*sinRotY*sinRotZ-sinRotX*cosRotZ},
+        sycl::float3{-sinRotY,
+                     sinRotX*cosRotY,
+                     cosRotX*cosRotY}
+    };
+    bestPointOnTriangle = Util::mvmul(negRot, bestPointOnTriangle) + triangle[0];
 
     return {bestPointOnTriangle, smallestDistanceSquared, bestVertexIndex};
 }
