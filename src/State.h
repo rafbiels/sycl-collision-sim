@@ -51,6 +51,7 @@ class ParallelState {
         explicit ParallelState(const Magnum::Range3D& worldBounds,
                                const std::vector<Actor>& actors,
                                size_t numAllVertices,
+                               size_t numAllTriangles,
                                const sycl::queue& queue);
 
         /// Copy and assignment explicitly deleted
@@ -76,6 +77,9 @@ class ParallelState {
         USMData<uint16_t,Constants::NumActors> numVertices; // Caution: restricting N vertices per actor to 65536
         USMData<unsigned int,Constants::NumActors> verticesOffset;
         USMData<sycl::float3> bodyVertices;
+        USMData<uint16_t,Constants::NumActors> numTriangles; // Caution: restricting N triangles per actor to 65536
+        USMData<unsigned int,Constants::NumActors> trianglesOffset;
+        USMData<sycl::uint3> triangles;
         ///@}
 
         /// Motion simulation variables

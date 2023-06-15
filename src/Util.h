@@ -112,9 +112,10 @@ void orthonormaliseRotation(Magnum::Matrix4& trfMatrix);
 
 /// Magnum<->SYCL vector and matrix conversions
 ///@{
-constexpr sycl::float3 toSycl(const Magnum::Vector3& vec) {
-    const float (&data)[3] = vec.data();
-    return sycl::float3{data[0],data[1],data[2]};
+template<typename T>
+constexpr sycl::vec<T,3> toSycl(const Magnum::Math::Vector<3,T>& vec) {
+    const T (&data)[3] = vec.data();
+    return {data[0],data[1],data[2]};
 }
 constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
     const float (&data)[9] = mat.data();
@@ -122,8 +123,9 @@ constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
             sycl::float3{data[3],data[4],data[5]},
             sycl::float3{data[6],data[7],data[8]}};
 }
-constexpr Magnum::Vector3 toMagnum(const sycl::float3& vec) {
-    return Magnum::Vector3{vec[0],vec[1],vec[2]};
+template<typename T>
+constexpr Magnum::Math::Vector<3,T> toMagnum(const sycl::vec<T,3>& vec) {
+    return {vec[0],vec[1],vec[2]};
 }
 constexpr Magnum::Matrix3 toMagnum(const std::array<sycl::float3,3>& mat) {
     return Magnum::Matrix3{

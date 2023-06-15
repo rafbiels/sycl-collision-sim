@@ -16,6 +16,15 @@ CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
     m_numVertices = vertices.size();
     m_vertexPositions = std::vector<Magnum::Vector3>(vertices.begin(), vertices.end());
     m_vertexPositionsWorld = std::vector<Magnum::Vector3>(vertices.begin(), vertices.end());
+
+    // Fill the triangle indices only for indexed meshes
+    if (!m_meshData.isIndexed()) {return;}
+    const auto& triangles{m_meshData.indicesAsArray()};
+    m_numTriangles = triangles.size() / 3;
+    m_triangles.reserve(m_numTriangles);
+    for (size_t iTriangle{0}; iTriangle < m_numTriangles; ++iTriangle) {
+        m_triangles.emplace_back(triangles[3*iTriangle], triangles[3*iTriangle+1], triangles[3*iTriangle+2]);
+    }
   }
 
 // -----------------------------------------------------------------------------
@@ -59,6 +68,11 @@ size_t CollisionSim::Shape::numVertices() const {
 }
 
 // -----------------------------------------------------------------------------
+size_t CollisionSim::Shape::numTriangles() const {
+    return m_numTriangles;
+}
+
+// -----------------------------------------------------------------------------
 const std::vector<Magnum::Vector3>& CollisionSim::Shape::vertexPositions() const {
     return m_vertexPositions;
 }
@@ -71,6 +85,11 @@ const std::vector<Magnum::Vector3>& CollisionSim::Shape::vertexPositionsWorld() 
 // -----------------------------------------------------------------------------
 std::vector<Magnum::Vector3>& CollisionSim::Shape::vertexPositionsWorld_nonconst() {
     return m_vertexPositionsWorld;
+}
+
+// -----------------------------------------------------------------------------
+const std::vector<Magnum::Vector3ui>& CollisionSim::Shape::triangles() const {
+    return m_triangles;
 }
 
 // -----------------------------------------------------------------------------

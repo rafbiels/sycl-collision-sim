@@ -67,6 +67,8 @@ class Application final : public Magnum::Platform::Application
         std::mutex m_computeFrameTimeSecMutex;
         /// Constant count of all vertices calculated at initialisation
         size_t m_numAllVertices{0};
+        /// Constant count of all triangles calculated at initialisation
+        size_t m_numAllTriangles{0};
 
         std::optional<SequentialState> m_sequentialState;
         std::optional<ParallelState> m_parallelState;

@@ -61,7 +61,7 @@ m_computeTask{[this]{compute();}}
     } else {
         try {
             m_syclQueue = sycl::queue{};
-            m_parallelState.emplace(m_world.boundaries(), m_actors, m_numAllVertices, m_syclQueue.value());
+            m_parallelState.emplace(m_world.boundaries(), m_actors, m_numAllVertices, m_numAllTriangles, m_syclQueue.value());
             Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
             // Copy initial data to the device
             m_parallelState->copyAllToDeviceAsync();
@@ -252,6 +252,7 @@ void CollisionSim::Application::createActors() {
         );
         m_actors.back().colour(colours[i % colours.size()]);
         m_numAllVertices += m_actors.back().numVertices();
+        m_numAllTriangles += m_actors.back().numTriangles();
     }
 }
 
