@@ -224,15 +224,32 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
     };
 }
 
-/// Structure returned by \c closestPointOnTriangle
+/**
+ * @brief Transform a triangle to a coordinate system where its first vertex is
+ * at the origin, the second vertex lies on z-axis and the third in the yz-plane.
+ *
+ * @return 3 matrices 3x3: the transformed triangle (vertices in columns),
+ * the rotation matrix to transform points to the new coordinate system,
+ * the rotation matrix to transform points back to the original coordinate system
+ *
+ * Note the full transform also requires a translation which is a vector opposite
+ * to the location of the first triangle vertex.
+ */
+std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl::float3,3>& triangle);
+
+/// Returns the closest point and distance squared d^2
+/// assuming the coordinate system from \c triangleTransform
+std::pair<sycl::float3,float> closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const sycl::float3& point);
+
+/// Structure returned by \c closestPointOnTriangleND
 struct ClosestPointOnTriangleReturnValue {
     sycl::float3 bestPointOnTriangle{0.0f,0.0f,0.0f};
     float distanceSquared{0.0f};
     size_t iVertex{0};
 };
 
-/// Returns the closest point P and distance d as {Px, Py, Pz, d}
-ClosestPointOnTriangleReturnValue closestPointOnTriangle(
+/// Returns the closest point and distance squared across all \c vertices
+ClosestPointOnTriangleReturnValue closestPointOnTriangleND(
     const std::array<sycl::float3,3>& triangle,
     const std::vector<Magnum::Vector3>& vertices);
 
