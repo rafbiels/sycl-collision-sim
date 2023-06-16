@@ -235,6 +235,7 @@ constexpr std::array<sycl::float3,3> inverse(const std::array<sycl::float3,3>& m
  * Note the full transform also requires a translation which is a vector opposite
  * to the location of the first triangle vertex.
  */
+SYCL_EXTERNAL extern
 std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl::float3,3>& triangle);
 
 /// Returns the closest point and distance squared d^2

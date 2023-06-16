@@ -224,7 +224,7 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState& state)
             if (Util::equal(A,B) || Util::equal(B,C)) {continue;}
 
             std::array<sycl::float3,3> triangle{A, B, C};
-            const auto closest = Util::closestPointOnTriangle(triangle, verticesA);
+            const auto closest = Util::closestPointOnTriangleND(triangle, verticesA);
             if (closest.distanceSquared < smallestDistanceSquared) {
                 smallestDistanceSquared = closest.distanceSquared;
                 bestVertex = sycl::float3{verticesA[0][closest.iVertex], verticesA[1][closest.iVertex], verticesA[2][closest.iVertex]};
@@ -245,7 +245,7 @@ void collideNarrowSequential(std::vector<Actor>& actors, SequentialState& state)
             if (Util::equal(A,B) || Util::equal(B,C)) {continue;}
 
             std::array<sycl::float3,3> triangle{A, B, C};
-            const auto closest = Util::closestPointOnTriangle(triangle, verticesB);
+            const auto closest = Util::closestPointOnTriangleND(triangle, verticesB);
             if (closest.distanceSquared < smallestDistanceSquared) {
                 smallestDistanceSquared = closest.distanceSquared;
                 bestVertex = sycl::float3{verticesB[0][closest.iVertex], verticesB[1][closest.iVertex], verticesB[2][closest.iVertex]};
@@ -366,6 +366,9 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         uint32_t* verticesOffset = state.verticesOffset.devicePointer;
         sycl::float3* bodyVertices = state.bodyVertices.devicePointer;
         sycl::float3* worldVertices = state.worldVertices.devicePointer;
+        uint16_t* numTriangles = state.numTriangles.devicePointer;
+        uint32_t* trianglesOffset = state.trianglesOffset.devicePointer;
+        sycl::uint3* triangles = state.triangles.devicePointer;
         sycl::float3* angularVelocity = state.angularVelocity.devicePointer;
         float3x3* rotation = state.rotation.devicePointer;
         sycl::float3* force = state.force.devicePointer;
@@ -587,6 +590,61 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 );
             });
         });
+
+        // Copy back overlaps to host in order to find out how many narrow-phase kernels to submit
+        state.aabbOverlaps.copyToHost(aabbOverlapKernelEvent).wait_and_throw();
+        std::vector<std::pair<size_t,size_t>> triggeredOverlaps;
+        std::unordered_set<size_t> overlappingActors;
+        size_t numTrianglesToCheck{0};
+        size_t numActorsToCheck{0};
+        for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
+            if (state.aabbOverlaps.hostContainer[iPair]) {
+                const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
+                triggeredOverlaps.push_back(pair);
+                // Corrade::Utility::Debug{} << "AABB collision: "
+                //     << triggeredOverlaps.back().first << triggeredOverlaps.back().second;
+                for (size_t iActor : {pair.first, pair.second}) {
+                    if (overlappingActors.insert(iActor).second) {
+                        numTrianglesToCheck += state.numTriangles.hostContainer[iActor];
+                        ++numActorsToCheck;
+                    };
+                }
+            }
+        }
+        if (!overlappingActors.empty()) {
+            // Corrade::Utility::Debug{} << "AABB overlapping actors: " << overlappingActors
+            //     << " with " << numTrianglesToCheck << " triangles to check";
+            USMData<uint16_t> usmOverlappingActors{queue, overlappingActors.size()};
+            usmOverlappingActors.hostContainer.assign(overlappingActors.begin(), overlappingActors.end());
+            uint16_t* dptrOverlappingActors = usmOverlappingActors.devicePointer;
+            sycl::event copyOverlappingActorsEvent = usmOverlappingActors.copyToDevice();
+            sycl::event triangleTransformKernelEvent = queue.submit([&](sycl::handler& cgh){
+                cgh.depends_on(copyOverlappingActorsEvent);
+                cgh.parallel_for<class triangle_transform_kernel>(numTrianglesToCheck, [=](sycl::id<1> id){
+                    unsigned int iTriangle{0};
+                    unsigned int iActor{0};
+                    unsigned int offset{0};
+                    for (unsigned int iOverlap{0}; iOverlap<numActorsToCheck; ++iOverlap) {
+                        const unsigned int iThisActor = dptrOverlappingActors[iOverlap];
+                        const uint16_t numTrianglesThisActor = numTriangles[iThisActor];
+                        const unsigned int iTriangleThisActor{static_cast<unsigned int>(id)-offset};
+                        if (iTriangleThisActor < numTrianglesThisActor) {
+                            iTriangle = trianglesOffset[iThisActor] + iTriangleThisActor;
+                            iActor = iThisActor;
+                        }
+                        offset += numTrianglesThisActor;
+                    }
+                    const unsigned int vertexOffset = verticesOffset[iActor];
+                    const sycl::uint3& triangleIndices{triangles[iTriangle]};
+                    std::array<sycl::float3,3> triangle{
+                        worldVertices[vertexOffset+triangleIndices[0]],
+                        worldVertices[vertexOffset+triangleIndices[1]],
+                        worldVertices[vertexOffset+triangleIndices[2]]
+                    };
+                    auto transform = Util::triangleTransform(triangle);
+                });
+            });
+        }
 
         // FIXME: Force synchronisation after aabbOverlapKernelEvent for now, which will be
         // replaced with real dependency on d2h copy of the narrow-phase collision output

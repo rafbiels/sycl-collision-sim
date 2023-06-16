@@ -133,6 +133,7 @@ void orthonormaliseRotation(Magnum::Matrix4 &trfMatrix) {
 }
 
 // -----------------------------------------------------------------------------
+SYCL_EXTERNAL
 std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl::float3,3>& triangle) {
     // ===========================================
     // Part of the "2D Method" following M.W. Jones 1995
