@@ -240,6 +240,7 @@ std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl
 
 /// Returns the closest point and distance squared d^2
 /// assuming the coordinate system from \c triangleTransform
+SYCL_EXTERNAL extern
 std::pair<sycl::float3,float> closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const sycl::float3& point);
 
 /// Structure returned by \c closestPointOnTriangleND

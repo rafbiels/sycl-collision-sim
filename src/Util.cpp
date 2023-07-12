@@ -219,6 +219,7 @@ std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl
 }
 
 // -----------------------------------------------------------------------------
+SYCL_EXTERNAL
 std::pair<sycl::float3,float> closestPointOnTriangle(const std::array<sycl::float3,3>& triangle, const sycl::float3& point) {
     // ===========================================
     // Part of the "2D Method" following M.W. Jones 1995
@@ -248,7 +249,7 @@ std::pair<sycl::float3,float> closestPointOnTriangle(const std::array<sycl::floa
         if (edgeCA >= 0) {
             // + - + (edgeBC assumed -)
             // 2D point closest to triangle vertex A
-            if (edgeBC > 0) {throw std::runtime_error("edgeBA expected <= 0 but is > 0");}
+            // if (edgeBC > 0) {throw std::runtime_error("edgeBA expected <= 0 but is > 0");}
             distanceSquared = P[0]*P[0]+P[1]*P[1]+P[2]*P[2];
             closestPoint = A;
         } else if (edgeBC >= 0) {
@@ -297,7 +298,7 @@ std::pair<sycl::float3,float> closestPointOnTriangle(const std::array<sycl::floa
     } else {
         // - - + (edgeCA assumed +)
         // 2D point closest to triangle edge CA
-        if (edgeCA < 0) {throw std::runtime_error("edgeCA expected >= 0 but is < 0");}
+        // if (edgeCA < 0) {throw std::runtime_error("edgeCA expected >= 0 but is < 0");}
         const float distanceYZSquared = (C[2]*P[1]-C[1]*P[2]) * (C[2]*P[1]-C[1]*P[2]) / (C[1]*C[1]+C[2]*C[2]);
         distanceSquared = P[0]*P[0] + distanceYZSquared;
         const float CDOverCA = sycl::sqrt(

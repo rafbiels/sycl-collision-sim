@@ -36,6 +36,9 @@ constexpr static size_t SqrtNumActors{ACTOR_GRID_SIZE};
 /// Number of actors
 constexpr static size_t NumActors{SqrtNumActors*SqrtNumActors};
 
+/// Maximum number of triangles in the mesh of a single actor (used to allocate arrays)
+constexpr static size_t MaxNumTriangles{320};
+
 /// Scaling factors with respect to SI units
 namespace Units {
 constexpr static float Distance{100.f}; // cm
@@ -58,6 +61,9 @@ constexpr static float EarthGravity{-9.81f * Units::Distance / (Units::Time * Un
 
 /// Restitution coefficient (fraction of kinematic energy conserved in a collision)
 constexpr static float RestitutionCoefficient{0.98f};
+
+/// Narrow phase collision threshold for triangle-vertex distance between actors
+constexpr static float NarrowPhaseCollisionThreshold{0.001f*0.001f};
 
 /// Look-up table binomial coefficient of n^2 for small numbers
 template<size_t n>

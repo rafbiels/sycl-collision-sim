@@ -5,6 +5,7 @@
  */
 
 #include "Shape.h"
+#include "Constants.h"
 #include <Magnum/MeshTools/Compile.h>
 #include <limits>
 
@@ -24,6 +25,13 @@ CollisionSim::Shape::Shape(Magnum::Trade::MeshData&& meshData)
     m_triangles.reserve(m_numTriangles);
     for (size_t iTriangle{0}; iTriangle < m_numTriangles; ++iTriangle) {
         m_triangles.emplace_back(triangles[3*iTriangle], triangles[3*iTriangle+1], triangles[3*iTriangle+2]);
+    }
+    if (m_numTriangles > Constants::MaxNumTriangles) {
+        std::string msg{"Shape num triangles="};
+        msg.append(std::to_string(m_numTriangles));
+        msg.append(" exceeds MaxNumTriangles=");
+        msg.append(std::to_string(Constants::MaxNumTriangles));
+        throw std::runtime_error(msg);
     }
   }
 

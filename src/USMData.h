@@ -37,6 +37,9 @@ struct USMData {
     /// Dynamic size constructor
     explicit USMData(const sycl::queue& q, size_t count) requires USMDataConcepts::DynamicSize<N>
         : queue{q}, hostContainer(count), devicePointer{sycl::malloc_device<T>(count, q)} {}
+    /// Dynamic size constructor from another vector
+    explicit USMData(const sycl::queue& q, const std::vector<T>& v) requires USMDataConcepts::DynamicSize<N>
+        : queue{q}, hostContainer(v), devicePointer{sycl::malloc_device<T>(v.size(), q)} {}
     /// Fixed size constructor
     explicit USMData(const sycl::queue& q, std::array<T,N>&& values={}) requires USMDataConcepts::FixedSize<N>
         : queue{q}, hostContainer{values}, devicePointer{sycl::malloc_device<T>(N, q)} {}
