@@ -344,6 +344,8 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         state.force.hostContainer[iActor] = Util::toSycl(actors[iActor].force());
         state.torque.hostContainer[iActor] = Util::toSycl(actors[iActor].torque());
     }
+    std::vector<sycl::event> d2hCopyTransformAndVelocity;
+    std::vector<sycl::event> d2hCopyWallCollisionInfo;
     try {
         std::vector<sycl::event> h2dCopyEvents{
             state.linearVelocity.copyToDevice(),
@@ -386,6 +388,8 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             state.sortedAABBEdges[2].devicePointer
         };
         bool* aabbOverlaps = state.aabbOverlaps.devicePointer;
+        int* pairedActorIndices = state.pairedActorIndices.devicePointer;
+        int* actorImpulseApplied = state.actorImpulseApplied.devicePointer;
 
         sycl::event actorKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
@@ -421,6 +425,10 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 rotation[id][0] += drot[0];
                 rotation[id][1] += drot[1];
                 rotation[id][2] += drot[2];
+
+                // Reset AABB pairing info and impulse lock
+                pairedActorIndices[id] = -1;
+                actorImpulseApplied[id] = 0;
             });
         });
 
@@ -548,15 +556,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             });
         });
 
-        // Start copying back to host data needed there which won't change beyond this point
-        std::vector<sycl::event> d2hCopyEvents{
-            state.translation.copyToHost(actorKernelEvent),
-            state.rotation.copyToHost(actorKernelEvent),
-            state.wallCollisions.copyToHost(vertexKernelEvent),
-            state.addLinearVelocity.copyToHost(vertexKernelEvent),
-            state.addAngularVelocity.copyToHost(vertexKernelEvent),
-        };
-
         // Find overlapping AABB pairs
         sycl::event aabbOverlapKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(aabbSortKernelEvent);
@@ -588,20 +587,21 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                     overlap(posStartA[1], posEndA[1], posStartB[1], posEndB[1]) &&
                     overlap(posStartA[2], posEndA[2], posStartB[2], posEndB[2])
                 );
+                if (aabbOverlaps[id]) {
+                    pairedActorIndices[iActorA] = static_cast<int>(iActorB);
+                    pairedActorIndices[iActorB] = static_cast<int>(iActorA);
+                }
             });
         });
 
-        // Copy back overlaps to host in order to find out how many narrow-phase kernels to submit
-        state.aabbOverlaps.copyToHost(aabbOverlapKernelEvent).wait_and_throw();
+        // Copy back overlap check ouput to host in order to find out how many narrow-phase kernels to submit
+        state.pairedActorIndices.copyToHost(aabbOverlapKernelEvent).wait_and_throw();
         std::unordered_set<uint16_t> overlappingActors;
-        USMData<int,Constants::NumActors> usmPairedActorIndices{queue,{-1}};
         size_t numTrianglesToCheck{0};
         size_t numActorsToCheck{0};
         for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
-            if (state.aabbOverlaps.hostContainer[iPair]) {
-                const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
-                usmPairedActorIndices.hostContainer[pair.first] = pair.second;
-                usmPairedActorIndices.hostContainer[pair.second] = pair.first;
+            const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
+            if (state.pairedActorIndices.hostContainer[pair.first]==pair.second) {
                 for (size_t iActor : {pair.first, pair.second}) {
                     if (overlappingActors.insert(iActor).second) {
                         numTrianglesToCheck += state.numTriangles.hostContainer[iActor];
@@ -610,13 +610,12 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 }
             }
         }
+        std::optional<sycl::event> impulseCollisionKernelEvent;
         if (!overlappingActors.empty()) {
             USMData<uint16_t> usmOverlappingActors{queue, overlappingActors.size()};
             usmOverlappingActors.hostContainer.assign(overlappingActors.begin(), overlappingActors.end());
             sycl::event copyOverlappingActorsEvent = usmOverlappingActors.copyToDevice();
-            sycl::event copyPairedActorIndicesEvent = usmPairedActorIndices.copyToDevice();
             uint16_t* dptrOverlappingActors = usmOverlappingActors.devicePointer;
-            int* dptrPairedActorIndices = usmPairedActorIndices.devicePointer;
 
             // Allocate USM container for the output of the triangle-vertex matching
             // {float3 point on triangle, float3 normal, float distance squared}
@@ -634,8 +633,8 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 });
             });
 
-            sycl::event triangleTransformKernelEvent = queue.submit([&](sycl::handler& cgh){
-                cgh.depends_on({copyOverlappingActorsEvent,copyPairedActorIndicesEvent,resetTriangleVertexMatchEvent});
+            sycl::event narrowPhaseKernelEvent = queue.submit([&](sycl::handler& cgh){
+                cgh.depends_on({copyOverlappingActorsEvent,resetTriangleVertexMatchEvent});
                 cgh.parallel_for<class narrow_phase_kernel>(numTrianglesToCheck, [=](sycl::id<1> id){
                     unsigned int iTriangle{0};
                     unsigned int iActor{0};
@@ -665,7 +664,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                     const auto& rot = transformed[1];
                     const auto& negRot = transformed[2];
 
-                    unsigned int iOtherActor{static_cast<unsigned int>(dptrPairedActorIndices[iActor])};
+                    unsigned int iOtherActor{static_cast<unsigned int>(pairedActorIndices[iActor])};
                     const unsigned int vertexOffsetOtherActor = verticesOffset[iOtherActor];
                     const unsigned int numVerticesOtherActor = numVertices[iOtherActor];
 
@@ -714,7 +713,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
 
             // For each actor out of numActorsToCheck, reduce all triangle-vertex pairs to the one with the smallest distance
             sycl::event triangleVertexReduceKernelEvent = queue.submit([&](sycl::handler& cgh){
-                cgh.depends_on(triangleTransformKernelEvent);
+                cgh.depends_on(narrowPhaseKernelEvent);
                 size_t temp_memory_size = Constants::MaxNumTriangles*sizeof(TVMatch);
                 sycl::local_accessor<std::byte, 1> scratch{temp_memory_size, cgh};
                 cgh.parallel_for<class tv_reduce_kernel>(reduceRange, [=](sycl::nd_item<1> item){
@@ -729,115 +728,84 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 });
             });
 
-            // FIXME: Force synchronisation after triangleVertexReduceKernelEvent for now, which will be
-            // replaced with real dependency on d2h copy of the final narrow-phase collision output
-            sycl::event triangleVertexReduceCopyEvent = usmTriangleBestMatch.copyToHost(triangleVertexReduceKernelEvent);
-            d2hCopyEvents.push_back(triangleVertexReduceCopyEvent);
-            triangleVertexReduceCopyEvent.wait_and_throw();
-            usmTriangleVertexMatch.copyToHost(triangleTransformKernelEvent).wait_and_throw();
-
-            size_t iOverlap{0};
-            std::vector<std::pair<uint16_t,uint16_t>> collidingPairs;
-            std::vector<TVMatch> collidingTV;
-            std::vector<char> triangleFromFirstInPair;
-            for (uint16_t iActor : overlappingActors) {
-                const TVMatch& tv = usmTriangleBestMatch.hostContainer[iOverlap];
-                if (tv.dsq >= Constants::NarrowPhaseCollisionThreshold) {
-                    ++iOverlap;
-                    continue;
-                }
-
-                uint16_t iOtherActor = usmPairedActorIndices.hostContainer[iActor];
-                std::pair<uint16_t,uint16_t> pair = iActor < iOtherActor ?
-                    std::pair<uint16_t,uint16_t>{iActor,iOtherActor} :
-                    std::pair<uint16_t,uint16_t>{iOtherActor,iActor};
-                const auto it = std::find(collidingPairs.begin(), collidingPairs.end(), pair);
-                if (it == collidingPairs.end()) {
-                    collidingPairs.push_back(pair);
-                    collidingTV.push_back(tv);
-                    triangleFromFirstInPair.push_back(pair.first==iActor);
-                } else {
-                    size_t index = std::distance(collidingPairs.begin(),it);
-                    if (collidingPairs[index]!=pair) {throw std::runtime_error{"wrong index"};}
-                    if (tv.dsq < collidingTV[index].dsq) {
-                        collidingTV[index] = tv;
-                        triangleFromFirstInPair[index] = (pair.first==iActor);
-                    }
-                }
-                ++iOverlap;
-            }
-
-            // Copy the fully-reduced collision data to the device
-            USMData<std::pair<uint16_t,uint16_t>> usmCollidingPairs{queue, collidingPairs};
-            USMData<TVMatch> usmCollidingTV{queue, collidingTV};
-            USMData<char> usmTriangleFromFirstInPair{queue, triangleFromFirstInPair};
-            sycl::event h2dCollidingPairsEvent = usmCollidingPairs.copyToDevice();
-            sycl::event h2dCollidingTVEvent = usmCollidingTV.copyToDevice();
-            sycl::event h2dTriangleFromFirstInPair = usmTriangleFromFirstInPair.copyToDevice();
-            std::pair<uint16_t,uint16_t>* dptrCollidingPairs = usmCollidingPairs.devicePointer;
-            TVMatch* dptrCollidingTV = usmCollidingTV.devicePointer;
-            char* dptrTriangleFromFirstInPair = usmTriangleFromFirstInPair.devicePointer;
             // Submit the impulse collision kernel
-            sycl::event impulseCollisionKernelEvent = queue.submit([&](sycl::handler& cgh){
-                cgh.depends_on({h2dCollidingPairsEvent, h2dCollidingTVEvent});
-                cgh.parallel_for<class impulse_collision_kernel>(collidingPairs.size(), [=](sycl::id<1> id){
-                    uint16_t iActorA{0}, iActorB{0};
-                    if (dptrTriangleFromFirstInPair[id]) {
-                        iActorA = dptrCollidingPairs[id].first;
-                        iActorB = dptrCollidingPairs[id].second;
-                    } else {
-                        iActorA = dptrCollidingPairs[id].second;
-                        iActorB = dptrCollidingPairs[id].first;
+            impulseCollisionKernelEvent = queue.submit([&](sycl::handler& cgh){
+                cgh.depends_on(triangleVertexReduceKernelEvent);
+                cgh.parallel_for<class impulse_collision_kernel>(numActorsToCheck, [=](sycl::id<1> id){
+                    uint16_t iActorA = dptrOverlappingActors[id];
+                    uint16_t iActorB = pairedActorIndices[iActorA];
+                    unsigned int idB{std::numeric_limits<unsigned int>::max()};
+                    for (auto i{0}; i<numActorsToCheck; ++i) {
+                        if (dptrOverlappingActors[i]==iActorB) {idB = i;}
                     }
-                    const sycl::float3& point{dptrCollidingTV[id].pointOnTriangle};
-                    const sycl::float3& normal{dptrCollidingTV[id].normal};
-                    sycl::float3 ra = point - translation[iActorA];
-                    sycl::float3 rb = point - translation[iActorB];
-                    sycl::float3 vpa = linearVelocity[iActorA] + sycl::cross(angularVelocity[iActorA], ra);
-                    sycl::float3 vpb = linearVelocity[iActorB] + sycl::cross(angularVelocity[iActorB], rb);
-                    sycl::float3 vr = vpb - vpa;
-                    sycl::float3 ta = Util::mvmul(inertiaInv[iActorA], sycl::cross(ra,normal));
-                    sycl::float3 tb = Util::mvmul(inertiaInv[iActorB], sycl::cross(rb,normal));
-                    float impulse =
-                        (-1.0f - Constants::RestitutionCoefficient) *
-                        sycl::dot(vr,normal) / (
-                            1.0f/mass[iActorA] +
-                            1.0f/mass[iActorB] +
-                            sycl::dot(
-                                sycl::cross(ta, ra) +
-                                sycl::cross(tb, rb)
-                                , normal
-                            )
-                        );
-                    sycl::float3 addLinVA = -1.0f * normal * impulse / mass[iActorA];
-                    sycl::float3 addLinVB = normal * impulse / mass[iActorB];
-                    sycl::float3 addAngVA = -1.0f * impulse * ta;
-                    sycl::float3 addAngVB = impulse * tb;
+                    const TVMatch& tvA = dptrTriangleBestMatch[id];
+                    const TVMatch& tvB = dptrTriangleBestMatch[idB];
+                    if (tvA.dsq < Constants::NarrowPhaseCollisionThreshold && tvA.dsq < tvB.dsq) {
+                        const sycl::float3& point{tvA.pointOnTriangle};
+                        const sycl::float3& normal{tvA.normal};
+                        sycl::float3 ra = point - translation[iActorA];
+                        sycl::float3 rb = point - translation[iActorB];
+                        sycl::float3 vpa = linearVelocity[iActorA] + sycl::cross(angularVelocity[iActorA], ra);
+                        sycl::float3 vpb = linearVelocity[iActorB] + sycl::cross(angularVelocity[iActorB], rb);
+                        sycl::float3 vr = vpb - vpa;
+                        sycl::float3 ta = Util::mvmul(inertiaInv[iActorA], sycl::cross(ra,normal));
+                        sycl::float3 tb = Util::mvmul(inertiaInv[iActorB], sycl::cross(rb,normal));
+                        float impulse =
+                            (-1.0f - Constants::RestitutionCoefficient) *
+                            sycl::dot(vr,normal) / (
+                                1.0f/mass[iActorA] +
+                                1.0f/mass[iActorB] +
+                                sycl::dot(
+                                    sycl::cross(ta, ra) +
+                                    sycl::cross(tb, rb)
+                                    , normal
+                                )
+                            );
+                        sycl::float3 addLinVA = -1.0f * normal * impulse / mass[iActorA];
+                        sycl::float3 addLinVB = normal * impulse / mass[iActorB];
+                        sycl::float3 addAngVA = -1.0f * impulse * ta;
+                        sycl::float3 addAngVB = impulse * tb;
 
-                    linearVelocity[iActorA] += addLinVA;
-                    linearVelocity[iActorB] += addLinVB;
-                    angularVelocity[iActorA] += addAngVA;
-                    angularVelocity[iActorB] += addAngVB;
+                        auto canApplyImpulse = [&actorImpulseApplied](uint16_t iActor){
+                            sycl::atomic_ref<int, sycl::memory_order::acq_rel, sycl::memory_scope::device, sycl::access::address_space::global_space>
+                                lock{actorImpulseApplied[iActor]};
+                            int alreadyApplied{0};
+                            return lock.compare_exchange_strong(alreadyApplied, 1, sycl::memory_order::acq_rel);
+                        };
+                        if (canApplyImpulse(iActorA)) {
+                            linearVelocity[iActorA] += addLinVA;
+                            angularVelocity[iActorA] += addAngVA;
+                        }
+                        if (canApplyImpulse(iActorB)) {
+                            linearVelocity[iActorB] += addLinVB;
+                            angularVelocity[iActorB] += addAngVB;
+                        }
+                    }
                 });
-            });
-            d2hCopyEvents.insert(d2hCopyEvents.end(),{
-                state.linearVelocity.copyToHost(impulseCollisionKernelEvent),
-                state.angularVelocity.copyToHost(impulseCollisionKernelEvent),
-            });
-        } else {
-            d2hCopyEvents.insert(d2hCopyEvents.end(),{
-                state.linearVelocity.copyToHost(actorKernelEvent),
-                state.angularVelocity.copyToHost(actorKernelEvent),
             });
         }
 
-        // Wait for all the device-to-host memory copies to finish
-        sycl::event::wait_and_throw(d2hCopyEvents);
+        d2hCopyWallCollisionInfo.insert(d2hCopyWallCollisionInfo.end(),{
+            state.wallCollisions.copyToHost(vertexKernelEvent),
+            state.addLinearVelocity.copyToHost(vertexKernelEvent),
+            state.addAngularVelocity.copyToHost(vertexKernelEvent),
+        });
+        d2hCopyTransformAndVelocity.insert(d2hCopyTransformAndVelocity.end(), {
+            state.translation.copyToHost(actorKernelEvent),
+            state.rotation.copyToHost(actorKernelEvent),
+            state.linearVelocity.copyToHost(impulseCollisionKernelEvent.value_or(actorKernelEvent)),
+            state.angularVelocity.copyToHost(impulseCollisionKernelEvent.value_or(actorKernelEvent)),
+        });
     } catch (const std::exception& ex) {
         Corrade::Utility::Error{} << "Exception caught: " << ex.what();
     }
 
     // Reset force and torque, and transfer serial state data to Actor objects
+    try {
+        sycl::event::wait_and_throw(d2hCopyTransformAndVelocity);
+    } catch (const std::exception& ex) {
+        Corrade::Utility::Error{} << "Exception caught: " << ex.what();
+    }
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
         actors[iActor].force({0, 0, 0});
         actors[iActor].torque({0, 0, 0});
@@ -855,6 +823,11 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         std::vector<sycl::float3> addAngularV;
     };
     std::unordered_map<size_t, CollisionData> actorCollisions; // {actor index, collision data}
+    try {
+        sycl::event::wait_and_throw(d2hCopyWallCollisionInfo);
+    } catch (const std::exception& ex) {
+        Corrade::Utility::Error{} << "Exception caught: " << ex.what();
+    }
     for (size_t iVertex{0}; iVertex<state.numAllVertices; ++iVertex) {
         Wall collision = state.wallCollisions.hostContainer[iVertex];
         if (collision==Wall::None) {continue;}

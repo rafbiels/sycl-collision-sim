@@ -104,6 +104,8 @@ class ParallelState {
         std::array<USMData<sycl::float2, Constants::NumActors>,3> aabb;
         std::array<USMData<Edge, 2*Constants::NumActors>,3> sortedAABBEdges;
         USMData<bool,Constants::NumActorPairs> aabbOverlaps;
+        USMData<int,Constants::NumActors> pairedActorIndices;
+        USMData<int,Constants::NumActors> actorImpulseApplied; /// Lock to avoid concurrent collisions
         ///@}
 };
 
