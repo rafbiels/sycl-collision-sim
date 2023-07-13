@@ -318,20 +318,6 @@ void impulseCollision(Actor& a, Actor& b, const Magnum::Vector3& point, const Ma
     Magnum::Vector3 addLinVB = normal * impulse / b.mass();
     Magnum::Vector3 addAngVA = -1.0f * impulse * ta;
     Magnum::Vector3 addAngVB = impulse * tb;
-    // std::cout <<    "ra \t= ("    << ra[0] << ',' << ra[1] << ',' << ra[2]
-    //           << ")\nrb \t= ("  << rb[0] << ',' << rb[1] << ',' << rb[2]
-    //           << ")\nnormal \t= ("  << normal[0] << ',' << normal[1] << ',' << normal[2]
-    //           << ")\nvpa \t= (" << vpa[0] << ',' << vpa[1] << ',' << vpa[2]
-    //           << ")\nvpb \t= (" << vpb[0] << ',' << vpb[1] << ',' << vpb[2]
-    //           << ")\nvr \t= ("  << vr[0] << ',' << vr[1] << ',' << vr[2]
-    //           << ")\nta \t= ("  << ta[0] << ',' << ta[1] << ',' << ta[2]
-    //           << ")\ntb \t= ("  << tb[0] << ',' << tb[1] << ',' << tb[2]
-    //           << ")\naddLinVA \t= ("  << addLinVA[0] << ',' << addLinVA[1] << ',' << addLinVA[2]
-    //           << ")\naddLinVB \t= ("  << addLinVB[0] << ',' << addLinVB[1] << ',' << addLinVB[2]
-    //           << ")\naddAngVA \t= ("  << addAngVA[0] << ',' << addAngVA[1] << ',' << addAngVA[2]
-    //           << ")\naddAngVB \t= ("  << addAngVB[0] << ',' << addAngVB[1] << ',' << addAngVB[2]
-    //           << ")\nimpulse \t= " << impulse
-    //           << "\n\n";
     a.addVelocity(addLinVA, addAngVA);
     b.addVelocity(addLinVB, addAngVB);
 }
@@ -616,7 +602,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
                 usmPairedActorIndices.hostContainer[pair.first] = pair.second;
                 usmPairedActorIndices.hostContainer[pair.second] = pair.first;
-                // Corrade::Utility::Debug{} << "Actors " << pair.first << " and " << pair.second << " overlap AABB";
                 for (size_t iActor : {pair.first, pair.second}) {
                     if (overlappingActors.insert(iActor).second) {
                         numTrianglesToCheck += state.numTriangles.hostContainer[iActor];
@@ -626,8 +611,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             }
         }
         if (!overlappingActors.empty()) {
-            // Corrade::Utility::Debug{} << "AABB overlapping actors: " << overlappingActors
-            //     << " with " << numTrianglesToCheck << " triangles to check";
             USMData<uint16_t> usmOverlappingActors{queue, overlappingActors.size()};
             usmOverlappingActors.hostContainer.assign(overlappingActors.begin(), overlappingActors.end());
             sycl::event copyOverlappingActorsEvent = usmOverlappingActors.copyToDevice();
@@ -636,7 +619,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             int* dptrPairedActorIndices = usmPairedActorIndices.devicePointer;
 
             // Allocate USM container for the output of the triangle-vertex matching
-            // float4 = {float3 point on triangle, float3 normal, float distance squared}
+            // {float3 point on triangle, float3 normal, float distance squared}
             struct TVMatch {
                 sycl::float3 pointOnTriangle{0.0f};
                 sycl::float3 normal{0.0f};
@@ -653,7 +636,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
 
             sycl::event triangleTransformKernelEvent = queue.submit([&](sycl::handler& cgh){
                 cgh.depends_on({copyOverlappingActorsEvent,copyPairedActorIndicesEvent,resetTriangleVertexMatchEvent});
-                // auto os = sycl::stream{1024,65535,cgh};
                 cgh.parallel_for<class narrow_phase_kernel>(numTrianglesToCheck, [=](sycl::id<1> id){
                     unsigned int iTriangle{0};
                     unsigned int iActor{0};
@@ -706,18 +688,11 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                     }
                     bestPointOnTriangle = Util::mvmul(negRot, bestPointOnTriangle) + triangle[0];
                     sycl::float3 normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
-                    // bestTriangleNorm /= sycl::length(bestTriangleNorm);
-                    // if (sycl::dot(bestTriangleNorm, bestTrianglePoint - Util::toSycl(actors[iActorA].transformation_const().translation())) < 0) {
-                    //     bestTriangleNorm *= -1.0f;
-                    // }
                     normal /= sycl::length(normal);
                     sycl::float3 radius{bestPointOnTriangle - translation[iActor]};
                     float direction = (sycl::dot(normal, radius) < 0) ? -1.0f : 1.0f;
                     normal *= direction;
 
-                    // os << "id " << id << " setting TVMatch for triangle id " << iOverlap*Constants::MaxNumTriangles + iActorTriangle
-                    //    << " to (" << bestPointOnTriangle[0] << ", " << bestPointOnTriangle[1] << ", " << bestPointOnTriangle[2] << ") "
-                    //    << smallestDistanceSquared << "\n";
                     dptrTriangleVertexMatch[iOverlap*Constants::MaxNumTriangles + iActorTriangle] = {
                         sycl::float3{bestPointOnTriangle[0], bestPointOnTriangle[1], bestPointOnTriangle[2]},
                         normal,
@@ -729,7 +704,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             // Allocate USM container for the output of the closest-distance triangle-vertex matching
             USMData<TVMatch> usmTriangleBestMatch{queue, numActorsToCheck};
             TVMatch* dptrTriangleBestMatch = usmTriangleBestMatch.devicePointer;
-            // constexpr static size_t wgSize{256};
             const sycl::nd_range<1> reduceRange{numActorsToCheck*Constants::MaxNumTriangles, Constants::MaxNumTriangles};
 
             struct MyReduce {
@@ -743,7 +717,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 cgh.depends_on(triangleTransformKernelEvent);
                 size_t temp_memory_size = Constants::MaxNumTriangles*sizeof(TVMatch);
                 sycl::local_accessor<std::byte, 1> scratch{temp_memory_size, cgh};
-                // auto os = sycl::stream{1024,65535,cgh};
                 cgh.parallel_for<class tv_reduce_kernel>(reduceRange, [=](sycl::nd_item<1> item){
                     const auto groupId{item.get_group_linear_id()};
                     const auto localId{item.get_local_linear_id()};
@@ -760,18 +733,9 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             // replaced with real dependency on d2h copy of the final narrow-phase collision output
             sycl::event triangleVertexReduceCopyEvent = usmTriangleBestMatch.copyToHost(triangleVertexReduceKernelEvent);
             d2hCopyEvents.push_back(triangleVertexReduceCopyEvent);
-
-            // DEBUGGING ONLY
             triangleVertexReduceCopyEvent.wait_and_throw();
             usmTriangleVertexMatch.copyToHost(triangleTransformKernelEvent).wait_and_throw();
-            // Corrade::Utility::Debug{} << "TriangleBestMatch size: " << usmTriangleBestMatch.hostContainer.size();
-            // for (const auto& tv : usmTriangleBestMatch.hostContainer) {
-            //     Corrade::Utility::Debug{} << Magnum::Vector3{tv.x,tv.y,tv.z} << tv.dsq;
-            // }
-            // Corrade::Utility::Debug{} << "TriangleVertexMatch size: " << usmTriangleVertexMatch.hostContainer.size();
-            // for (const auto& tv : usmTriangleVertexMatch.hostContainer) {
-            //     Corrade::Utility::Debug{} << Magnum::Vector3{tv.x,tv.y,tv.z} << tv.dsq;
-            // }
+
             size_t iOverlap{0};
             std::vector<std::pair<uint16_t,uint16_t>> collidingPairs;
             std::vector<TVMatch> collidingTV;
@@ -802,12 +766,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 }
                 ++iOverlap;
             }
-            // for (size_t iPair{0}; iPair<collidingPairs.size(); ++iPair) {
-            //     const auto& pair = collidingPairs[iPair];
-            //     const auto& tv = collidingTV[iPair];
-            //     Corrade::Utility::Debug{} << "Collision (" << pair.first << "," << pair.second << "): "
-            //         << Magnum::Vector3{tv.pointOnTriangle[0],tv.pointOnTriangle[1],tv.pointOnTriangle[2]} << tv.dsq;
-            // }
 
             // Copy the fully-reduced collision data to the device
             USMData<std::pair<uint16_t,uint16_t>> usmCollidingPairs{queue, collidingPairs};
@@ -822,7 +780,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             // Submit the impulse collision kernel
             sycl::event impulseCollisionKernelEvent = queue.submit([&](sycl::handler& cgh){
                 cgh.depends_on({h2dCollidingPairsEvent, h2dCollidingTVEvent});
-                // auto os = sycl::stream{1024,65535,cgh};
                 cgh.parallel_for<class impulse_collision_kernel>(collidingPairs.size(), [=](sycl::id<1> id){
                     uint16_t iActorA{0}, iActorB{0};
                     if (dptrTriangleFromFirstInPair[id]) {
@@ -857,20 +814,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                     sycl::float3 addAngVA = -1.0f * impulse * ta;
                     sycl::float3 addAngVB = impulse * tb;
 
-                    // os <<    "ra \t= ("    << ra[0] << ',' << ra[1] << ',' << ra[2]
-                    //    << ")\nrb \t= ("  << rb[0] << ',' << rb[1] << ',' << rb[2]
-                    //    << ")\nnormal \t= ("  << normal[0] << ',' << normal[1] << ',' << normal[2]
-                    //    << ")\nvpa \t= (" << vpa[0] << ',' << vpa[1] << ',' << vpa[2]
-                    //    << ")\nvpb \t= (" << vpb[0] << ',' << vpb[1] << ',' << vpb[2]
-                    //    << ")\nvr \t= ("  << vr[0] << ',' << vr[1] << ',' << vr[2]
-                    //    << ")\nta \t= ("  << ta[0] << ',' << ta[1] << ',' << ta[2]
-                    //    << ")\ntb \t= ("  << tb[0] << ',' << tb[1] << ',' << tb[2]
-                    //    << ")\naddLinVA \t= ("  << addLinVA[0] << ',' << addLinVA[1] << ',' << addLinVA[2]
-                    //    << ")\naddLinVB \t= ("  << addLinVB[0] << ',' << addLinVB[1] << ',' << addLinVB[2]
-                    //    << ")\naddAngVA \t= ("  << addAngVA[0] << ',' << addAngVA[1] << ',' << addAngVA[2]
-                    //    << ")\naddAngVB \t= ("  << addAngVB[0] << ',' << addAngVB[1] << ',' << addAngVB[2]
-                    //    << ")\nimpulse \t= " << impulse
-                    //    << "\n\n";
                     linearVelocity[iActorA] += addLinVA;
                     linearVelocity[iActorB] += addLinVB;
                     angularVelocity[iActorA] += addAngVA;
