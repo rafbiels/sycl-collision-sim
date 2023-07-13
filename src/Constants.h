@@ -81,8 +81,8 @@ constexpr static size_t NumActorPairs{binomialCoefficientOfSquare<Constants::Sqr
 consteval std::array<std::pair<size_t,size_t>,NumActorPairs> _actorPairsGenerator() {
     std::array<std::pair<size_t,size_t>,NumActorPairs> ret;
     size_t linear_index{0};
-    for (size_t i{0}; i<Constants::NumActors-1; ++i) {
-        for (size_t j{i+i}; j<Constants::NumActors; ++j) {
+    for (size_t i{0}; i<Constants::NumActors; ++i) {
+        for (size_t j{i+1}; j<Constants::NumActors; ++j) {
             ret[linear_index] = {i,j};
             ++linear_index;
         }
