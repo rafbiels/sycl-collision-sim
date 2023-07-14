@@ -145,6 +145,10 @@ constexpr Magnum::Matrix4 transformationMatrix(const sycl::float3& translation,
 }
 ///@}
 
+/// Create a ND-range maximising the use of all Compute Units
+/// (total N work items may be slightly larger than requested)
+sycl::nd_range<1> ndRangeAllCU(size_t minNumWorkItems, const sycl::queue& queue);
+
 /// SYCL float3 equality operation
 constexpr bool equal(const sycl::float3& a, const sycl::float3& b) {
     return a[0]==b[0] && a[1]==b[1] && a[2]==b[2];

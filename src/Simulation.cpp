@@ -556,6 +556,15 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             });
         });
 
+        // Start copying wall collision info to the host now, such that the memcpy
+        // API calls happen in the shadow of aabb_sort_kernel still running, and the
+        // async copy may continue while aabb_overlap_kernel runs
+        d2hCopyWallCollisionInfo.insert(d2hCopyWallCollisionInfo.end(),{
+            state.wallCollisions.copyToHost(vertexKernelEvent),
+            state.addLinearVelocity.copyToHost(vertexKernelEvent),
+            state.addAngularVelocity.copyToHost(vertexKernelEvent),
+        });
+
         // Find overlapping AABB pairs
         sycl::event aabbOverlapKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(aabbSortKernelEvent);
@@ -592,6 +601,14 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                     pairedActorIndices[iActorB] = static_cast<int>(iActorA);
                 }
             });
+        });
+
+        // Start copying transform info to the host now, such that the memcpy
+        // API calls and the copy itself happen in the shadow of the
+        // aabb_overlap_kernel still running
+        d2hCopyTransformAndVelocity.insert(d2hCopyTransformAndVelocity.end(), {
+            state.translation.copyToHost(actorKernelEvent),
+            state.rotation.copyToHost(actorKernelEvent),
         });
 
         // Copy back overlap check ouput to host in order to find out how many narrow-phase kernels to submit
@@ -634,70 +651,67 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 });
             });
 
+            const sycl::nd_range<1> narrowPhaseRange{Util::ndRangeAllCU(numTrianglesToCheck,queue)};
             sycl::event narrowPhaseKernelEvent = queue.submit([&](sycl::handler& cgh){
                 cgh.depends_on({copyOverlappingActorsEvent,resetTriangleVertexMatchEvent});
-                cgh.parallel_for<class narrow_phase_kernel>(numTrianglesToCheck, [=](sycl::id<1> id){
-                    unsigned int iTriangle{0};
-                    unsigned int iActor{0};
-                    unsigned int iActorTriangle{0};
-                    unsigned int iOverlap{0};
-                    unsigned int offset{0};
-                    for (unsigned int iThisOverlap{0}; iThisOverlap<numActorsToCheck; ++iThisOverlap) {
-                        const unsigned int iThisActor = dptrOverlappingActors[iThisOverlap];
-                        const uint16_t numTrianglesThisActor = numTriangles[iThisActor];
-                        const unsigned int iTriangleThisActor{static_cast<unsigned int>(id)-offset};
-                        if (iTriangleThisActor < numTrianglesThisActor) {
-                            iTriangle = trianglesOffset[iThisActor] + iTriangleThisActor;
-                            iActor = iThisActor;
-                            iActorTriangle = iTriangleThisActor;
-                            iOverlap = iThisOverlap;
+                cgh.parallel_for<class narrow_phase_kernel>(narrowPhaseRange, [=](sycl::nd_item<1> item){
+                    const unsigned int id{static_cast<unsigned int>(item.get_global_linear_id())};
+                    if (id < numTrianglesToCheck) {
+                        unsigned int iTriangle{0};
+                        unsigned int iActor{0};
+                        unsigned int result_index{0};
+                        unsigned int offset{0};
+                        for (unsigned int iThisOverlap{0}; iThisOverlap<numActorsToCheck; ++iThisOverlap) {
+                            const unsigned int iThisActor = dptrOverlappingActors[iThisOverlap];
+                            const uint16_t numTrianglesThisActor = numTriangles[iThisActor];
+                            const unsigned int iTriangleThisActor{id-offset};
+                            if (iTriangleThisActor < numTrianglesThisActor) {
+                                iTriangle = trianglesOffset[iThisActor] + iTriangleThisActor;
+                                iActor = iThisActor;
+                                result_index = iThisOverlap*Constants::MaxNumTriangles + iTriangleThisActor;
+                            }
+                            offset += numTrianglesThisActor;
                         }
-                        offset += numTrianglesThisActor;
-                    }
-                    const unsigned int vertexOffset = verticesOffset[iActor];
-                    const sycl::uint3& triangleIndices{triangles[iTriangle]};
-                    std::array<sycl::float3,3> triangle{
-                        worldVertices[vertexOffset+triangleIndices[0]],
-                        worldVertices[vertexOffset+triangleIndices[1]],
-                        worldVertices[vertexOffset+triangleIndices[2]]
-                    };
-                    auto transformed = Util::triangleTransform(triangle);
-                    const auto& rot = transformed[1];
-                    const auto& negRot = transformed[2];
+                        const unsigned int vertexOffset = verticesOffset[iActor];
+                        const sycl::uint3& triangleIndices{triangles[iTriangle]};
+                        std::array<sycl::float3,3> triangle{
+                            worldVertices[vertexOffset+triangleIndices[0]],
+                            worldVertices[vertexOffset+triangleIndices[1]],
+                            worldVertices[vertexOffset+triangleIndices[2]]
+                        };
+                        const auto transformed = Util::triangleTransform(triangle);
+                        const auto& rot = transformed[1];
+                        const auto& negRot = transformed[2];
 
-                    unsigned int iOtherActor{static_cast<unsigned int>(pairedActorIndices[iActor])};
-                    const unsigned int vertexOffsetOtherActor = verticesOffset[iOtherActor];
-                    const unsigned int numVerticesOtherActor = numVertices[iOtherActor];
+                        const unsigned int iOtherActor{static_cast<unsigned int>(pairedActorIndices[iActor])};
+                        const unsigned int vertexOffsetOtherActor = verticesOffset[iOtherActor];
+                        const unsigned int numVerticesOtherActor = numVertices[iOtherActor];
 
-                    float smallestDistanceSquared{std::numeric_limits<float>::max()};
-                    sycl::float3 bestPointOnTriangle{0.0f, 0.0f, 0.0f};
-                    unsigned int bestVertexIndex{std::numeric_limits<unsigned int>::max()};
+                        TVMatch result{};
+                        unsigned int bestVertexIndex{std::numeric_limits<unsigned int>::max()};
 
-                    for (unsigned int iVertex{0}; iVertex<numVerticesOtherActor; ++iVertex) {
-                        sycl::float3 P{worldVertices[vertexOffsetOtherActor+iVertex]};
-                        P -= triangle[0];
-                        P = Util::mvmul(rot,P);
+                        for (unsigned int iVertex{0}; iVertex<numVerticesOtherActor; ++iVertex) {
+                            sycl::float3 P{worldVertices[vertexOffsetOtherActor+iVertex]};
+                            P -= triangle[0];
+                            P = Util::mvmul(rot,P);
 
-                        const auto [closestPoint, distanceSquared] = Util::closestPointOnTriangle(transformed[0], P);
+                            const auto [closestPoint, distanceSquared] = Util::closestPointOnTriangle(transformed[0], P);
 
-                        if (distanceSquared < smallestDistanceSquared) {
-                            smallestDistanceSquared = distanceSquared;
-                            bestPointOnTriangle = closestPoint;
-                            bestVertexIndex = iVertex;
+                            if (distanceSquared < result.dsq) {
+                                result.dsq = distanceSquared;
+                                result.pointOnTriangle = closestPoint;
+                                bestVertexIndex = iVertex;
+                            }
                         }
-                    }
-                    bestPointOnTriangle = Util::mvmul(negRot, bestPointOnTriangle) + triangle[0];
-                    sycl::float3 normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
-                    normal /= sycl::length(normal);
-                    sycl::float3 radius{bestPointOnTriangle - translation[iActor]};
-                    float direction = (sycl::dot(normal, radius) < 0) ? -1.0f : 1.0f;
-                    normal *= direction;
+                        result.pointOnTriangle = Util::mvmul(negRot, result.pointOnTriangle) + triangle[0];
+                        result.normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
+                        result.normal /= sycl::length(result.normal);
+                        sycl::float3 radius{result.pointOnTriangle - translation[iActor]};
+                        float direction = (sycl::dot(result.normal, radius) < 0) ? -1.0f : 1.0f;
+                        result.normal *= direction;
 
-                    dptrTriangleVertexMatch[iOverlap*Constants::MaxNumTriangles + iActorTriangle] = {
-                        sycl::float3{bestPointOnTriangle[0], bestPointOnTriangle[1], bestPointOnTriangle[2]},
-                        normal,
-                        smallestDistanceSquared
-                    };
+                        dptrTriangleVertexMatch[result_index] = result;
+                    }
                 });
             });
 
@@ -786,14 +800,9 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             });
         }
 
-        d2hCopyWallCollisionInfo.insert(d2hCopyWallCollisionInfo.end(),{
-            state.wallCollisions.copyToHost(vertexKernelEvent),
-            state.addLinearVelocity.copyToHost(vertexKernelEvent),
-            state.addAngularVelocity.copyToHost(vertexKernelEvent),
-        });
+        // The velocity info copy can start only now, after it is potentially updated
+        // in the impulse_collision_kernel
         d2hCopyTransformAndVelocity.insert(d2hCopyTransformAndVelocity.end(), {
-            state.translation.copyToHost(actorKernelEvent),
-            state.rotation.copyToHost(actorKernelEvent),
             state.linearVelocity.copyToHost(impulseCollisionKernelEvent.value_or(actorKernelEvent)),
             state.angularVelocity.copyToHost(impulseCollisionKernelEvent.value_or(actorKernelEvent)),
         });

@@ -133,6 +133,18 @@ void orthonormaliseRotation(Magnum::Matrix4 &trfMatrix) {
 }
 
 // -----------------------------------------------------------------------------
+sycl::nd_range<1> ndRangeAllCU(size_t minNumWorkItems, const sycl::queue& queue) {
+    size_t nWG{queue.get_device().get_info<sycl::info::device::max_compute_units>()};
+    size_t maxWGSize{queue.get_device().get_info<sycl::info::device::max_work_group_size>()};
+    size_t wgSize{(minNumWorkItems+nWG-1)/nWG};
+    while (nWG*wgSize < minNumWorkItems || wgSize > maxWGSize) {
+        nWG *= 2;
+        wgSize = (minNumWorkItems+nWG-1)/nWG;
+    }
+    return sycl::nd_range<1>{nWG*wgSize, wgSize};
+}
+
+// -----------------------------------------------------------------------------
 SYCL_EXTERNAL
 std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl::float3,3>& triangle) {
     // ===========================================
