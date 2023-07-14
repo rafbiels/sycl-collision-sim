@@ -601,7 +601,8 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         size_t numActorsToCheck{0};
         for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
             const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
-            if (state.pairedActorIndices.hostContainer[pair.first]==pair.second) {
+            if (state.pairedActorIndices.hostContainer[pair.first]==pair.second ||
+                state.pairedActorIndices.hostContainer[pair.second]==pair.first) {
                 for (size_t iActor : {pair.first, pair.second}) {
                     if (overlappingActors.insert(iActor).second) {
                         numTrianglesToCheck += state.numTriangles.hostContainer[iActor];
