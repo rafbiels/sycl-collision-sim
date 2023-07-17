@@ -2,18 +2,54 @@ cmake_minimum_required(VERSION 3.12)
 project(CollisionSim)
 
 # ------------------------------------------------
+# Configure backend flags
+# ------------------------------------------------
+set(ENABLE_CUDA OFF CACHE BOOL "Build with CUDA target")
+set(ENABLE_HIP OFF CACHE BOOL "Build with HIP target")
+set(ENABLE_SPIR ON CACHE BOOL "Build with spir64 target")
+set(SYCL_TARGETS "")
+
+# ------------------------------------------------
 # Configure CUDA Compute Capability
 # ------------------------------------------------
-set(DEFAULT_CUDA_COMPUTE_CAPABILITY "50")
-execute_process(
-    COMMAND bash -c "which nvidia-smi >/dev/null && nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | tr -d '.'"
-    OUTPUT_VARIABLE CUDA_COMPUTE_CAPABILITY
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-if ("${CUDA_COMPUTE_CAPABILITY}" STREQUAL "")
-    message(WARNING "Failed to autoconfigure CUDA Compute Capability using nvidia-smi. Will default to sm_${DEFAULT_CUDA_COMPUTE_CAPABILITY}")
-    set(CUDA_COMPUTE_CAPABILITY ${DEFAULT_CUDA_COMPUTE_CAPABILITY})
-else()
-    message(STATUS "Detected CUDA Compute Capability to sm_${CUDA_COMPUTE_CAPABILITY}")
+if(${ENABLE_CUDA})
+    string(JOIN "," SYCL_TARGETS "${SYCL_TARGETS}" "nvptx64-nvidia-cuda")
+    set(DEFAULT_CUDA_COMPUTE_CAPABILITY "50")
+    execute_process(
+        COMMAND bash -c "which nvidia-smi >/dev/null && nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | tr -d '.'"
+        OUTPUT_VARIABLE CUDA_COMPUTE_CAPABILITY
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if ("${CUDA_COMPUTE_CAPABILITY}" STREQUAL "")
+        message(WARNING "Failed to autoconfigure CUDA Compute Capability using nvidia-smi. Will default to sm_${DEFAULT_CUDA_COMPUTE_CAPABILITY}")
+        set(CUDA_COMPUTE_CAPABILITY ${DEFAULT_CUDA_COMPUTE_CAPABILITY})
+    else()
+        message(STATUS "Detected CUDA Compute Capability to sm_${CUDA_COMPUTE_CAPABILITY}")
+    endif()
+endif()
+
+# ------------------------------------------------
+# Configure HIP target
+# ------------------------------------------------
+if(${ENABLE_HIP})
+    string(JOIN "," SYCL_TARGETS "${SYCL_TARGETS}" "amdgcn-amd-amdhsa")
+    set(DEFAULT_HIP_GFX_ARCH "gfx906")
+    execute_process(
+        COMMAND bash -c "which rocminfo >/dev/null && rocminfo | grep -o 'gfx[0-9]*' | head -n 1"
+        OUTPUT_VARIABLE HIP_GFX_ARCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if ("${HIP_GFX_ARCH}" STREQUAL "")
+        message(WARNING "Failed to autoconfigure CUDA Compute Capability using nvidia-smi. Will default to sm_${DEFAULT_HIP_GFX_ARCH}")
+        set(HIP_GFX_ARCH ${DEFAULT_HIP_GFX_ARCH})
+    else()
+        message(STATUS "Detected HIP gfx arch to ${HIP_GFX_ARCH}")
+    endif()
+endif()
+
+# ------------------------------------------------
+# Configure spir64 target
+# ------------------------------------------------
+if(${ENABLE_SPIR})
+    string(JOIN "," SYCL_TARGETS "${SYCL_TARGETS}" "spir64")
 endif()
 
 # ------------------------------------------------
@@ -42,11 +78,16 @@ add_compile_definitions(ACTOR_GRID_SIZE=${ACTOR_GRID_SIZE})
 # Configure compilation flags
 # ------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -fsycl-targets=nvptx64-nvidia-cuda,spir64")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xsycl-target-backend=nvptx64-nvidia-cuda --offload-arch=sm_${CUDA_COMPUTE_CAPABILITY}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -fsycl-targets=${SYCL_TARGETS}")
+if(${ENABLE_CUDA})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xsycl-target-backend=nvptx64-nvidia-cuda --offload-arch=sm_${CUDA_COMPUTE_CAPABILITY}")
+endif()
+if(${ENABLE_HIP})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xsycl-target-backend=amdgcn-amd-amdhsa --offload-arch=${HIP_GFX_ARCH}")
+endif()
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3 -Xsycl-target-backend=nvptx64-nvidia-cuda --cuda-noopt-device-debug")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -Xsycl-target-backend=nvptx64-nvidia-cuda --cuda-noopt-device-debug")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1")
 
 # ------------------------------------------------
 # Configure Magnum/Corrade
