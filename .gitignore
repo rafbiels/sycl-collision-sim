@@ -1,3 +1,6 @@
 build
 .vscode
 .clang-tidy
+*.csv
+*.png
+*.pdf

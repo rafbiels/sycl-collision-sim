@@ -28,7 +28,7 @@ constexpr static Util::Timer::duration_t TextUpdateInterval{std::chrono::millise
 constexpr static size_t FrameTimeCounterWindow{2048};
 
 /// Slow down or speed up the simulation with respect to real time
-constexpr static float RealTimeScale{0.2f};
+constexpr static float RealTimeScale{0.5f};
 
 /// Simulation size given by the square root of the number of actors
 constexpr static size_t SqrtNumActors{ACTOR_GRID_SIZE};
