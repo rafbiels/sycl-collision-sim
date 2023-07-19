@@ -547,10 +547,11 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 size_t id = item.get_global_linear_id();
                 for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
                     size_t i = id * 2 + step%2;
-                    if ((i+1) >= (2*Constants::NumActors)) {return;}
-                    compareExchange(0, sortedAABBEdges[0][i], sortedAABBEdges[0][i+1]);
-                    compareExchange(1, sortedAABBEdges[1][i], sortedAABBEdges[1][i+1]);
-                    compareExchange(2, sortedAABBEdges[2][i], sortedAABBEdges[2][i+1]);
+                    if ((i+1) < (2*Constants::NumActors)) {
+                        compareExchange(0, sortedAABBEdges[0][i], sortedAABBEdges[0][i+1]);
+                        compareExchange(1, sortedAABBEdges[1][i], sortedAABBEdges[1][i+1]);
+                        compareExchange(2, sortedAABBEdges[2][i], sortedAABBEdges[2][i+1]);
+                    }
                     sycl::group_barrier(item.get_group());
                 }
             });
