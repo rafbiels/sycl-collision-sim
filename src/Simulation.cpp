@@ -530,27 +530,26 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
 
         // Sort the AABB edges using odd-even merge-sort
         // Given the small size of the problem we can avoid submitting N(=2*NumActors) kernels.
-        // Instead, we can submit one kernel with a single work-group and exploit a work-group barrier.
+        // Instead, we can submit one kernel with a single work-group per axis and exploit a work-group barrier.
         // This requires that N is smaller than the maximum work-group size of the GPU we're using.
         sycl::event aabbSortKernelEvent = queue.submit([&](sycl::handler& cgh){
             cgh.depends_on(aabbKernelEvent);
-            cgh.parallel_for<class aabb_sort_kernel>(sycl::nd_range<1>{Constants::NumActors, Constants::NumActors}, [=](sycl::nd_item<1> item){
-                auto edgeValue = [aabb](unsigned int axis, Edge e) constexpr -> float {
+            cgh.parallel_for<class aabb_sort_kernel>(sycl::nd_range<1>{3*Constants::NumActors, Constants::NumActors}, [=](sycl::nd_item<1> item){
+                size_t axis = item.get_group_linear_id();
+                size_t id = item.get_local_linear_id();
+                auto edgeValue = [&aabb, &axis](Edge e) constexpr -> float {
                     return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
                 };
-                auto edgeGreater = [aabb, &edgeValue](unsigned int axis, Edge edgeA, Edge edgeB) constexpr -> bool {
-                    return edgeValue(axis, edgeA) > edgeValue(axis, edgeB);
+                auto edgeGreater = [&edgeValue](Edge edgeA, Edge edgeB) constexpr -> bool {
+                    return edgeValue(edgeA) > edgeValue(edgeB);
                 };
-                auto compareExchange = [aabb, &edgeGreater](unsigned int axis, Edge& edgeA, Edge& edgeB) constexpr -> void {
-                    if (edgeGreater(axis,edgeA,edgeB)) {std::swap(edgeA, edgeB);}
+                auto compareExchange = [&edgeGreater](Edge& edgeA, Edge& edgeB) constexpr -> void {
+                    if (edgeGreater(edgeA,edgeB)) {std::swap(edgeA, edgeB);}
                 };
-                size_t id = item.get_global_linear_id();
                 for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
                     size_t i = id * 2 + step%2;
                     if ((i+1) < (2*Constants::NumActors)) {
-                        compareExchange(0, sortedAABBEdges[0][i], sortedAABBEdges[0][i+1]);
-                        compareExchange(1, sortedAABBEdges[1][i], sortedAABBEdges[1][i+1]);
-                        compareExchange(2, sortedAABBEdges[2][i], sortedAABBEdges[2][i+1]);
+                        compareExchange(sortedAABBEdges[axis][i], sortedAABBEdges[axis][i+1]);
                     }
                     sycl::group_barrier(item.get_group());
                 }
