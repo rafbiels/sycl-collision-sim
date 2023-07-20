@@ -78,7 +78,7 @@ add_compile_definitions(ACTOR_GRID_SIZE=${ACTOR_GRID_SIZE})
 # Configure compilation flags
 # ------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -fsycl-targets=${SYCL_TARGETS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mtune=native -fsycl -fsycl-targets=${SYCL_TARGETS}")
 if(${ENABLE_CUDA})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xsycl-target-backend=nvptx64-nvidia-cuda --offload-arch=sm_${CUDA_COMPUTE_CAPABILITY}")
 endif()

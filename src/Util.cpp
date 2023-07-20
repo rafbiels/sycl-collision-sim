@@ -252,7 +252,7 @@ std::pair<sycl::float3,float> closestPointOnTriangle(const std::array<sycl::floa
     float distanceSquared{std::numeric_limits<float>::lowest()};
     sycl::float3 closestPoint{0.0f, 0.0f, 0.0f};
 
-    if (edgeAB <= 0 && edgeBC <= 0 && edgeCA <= 0) {
+    if (edgeAB < 0 && edgeBC < 0 && edgeCA < 0) {
         // - - -
         // 2D point inside triangle
         distanceSquared = P[0]*P[0];
