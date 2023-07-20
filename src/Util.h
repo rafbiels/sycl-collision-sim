@@ -85,6 +85,7 @@ class MovingAverage {
             }
             m_values.push_back(value);
         }
+        size_t size() const {return m_values.size();}
         void reset() {m_values.clear();};
     private:
         std::deque<T> m_values;

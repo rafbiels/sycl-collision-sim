@@ -162,6 +162,14 @@ int CollisionSim::Application::exec() {
     Util::RepeatTask printStatus{[&]{
     using FloatSecond = std::chrono::duration<float,std::ratio<1>>;
     float wallTimeSec{std::chrono::duration_cast<FloatSecond>(m_wallClock.peek()).count() * Constants::RealTimeScale};
+    // Skip the first reading which includes time before any collisions happen
+    static bool first{true};
+    if (first) {
+        first=false;
+        std::scoped_lock lock{m_computeFrameTimeSecMutex};
+        m_computeFrameTimeSec.reset();
+        return;
+    }
 
     if (m_textUpdateTimer.stepIfElapsed(Constants::TextUpdateInterval)) {
         float cfps{0.0f};
@@ -175,8 +183,16 @@ int CollisionSim::Application::exec() {
         Corrade::Utility::Debug{} << Corrade::Utility::format("Sim time: {:.1f}s", wallTimeSec);
     }
     }};
+    // Skip the first frame from FPS counting to avoid including the overhead of the first kernel submission
+    while (m_computeFrameTimeSec.size()<2) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    {
+        std::scoped_lock lock{m_computeFrameTimeSecMutex};
+        m_computeFrameTimeSec.reset();
+    }
     printStatus.start(std::chrono::seconds{1});
-    std::this_thread::sleep_for(std::chrono::seconds{5});
+    std::this_thread::sleep_for(std::chrono::seconds{6});
     printStatus.stop();
     return 0;
 }
