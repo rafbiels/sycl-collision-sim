@@ -69,14 +69,23 @@ def translateLabel(label):
         'AMD EPYC 7402 24-Core Processor': 'AMD EPYC 7402',
         'NVIDIA A100-PCIE-40GB': 'NVIDIA A100',
     }
+    backendDict = {
+        'cpp, ': '',
+        'cuda': 'CUDA',
+        'level_zero': 'Level Zero',
+        'opencl': 'OpenCL',
+    }
+    for k,v in backendDict.items():
+        label = label.replace(k,v)
     return d.get(label,label)
 
 
 def main():
     assert len(sys.argv) > 1, f'Usage: {sys.argv[0]} file.csv'
 
-    data = pd.read_csv(sys.argv[1],names=('code_path','device','grid_size','compute_fps'))
-    data = data[(data.grid_size>=5)]
+    data = pd.read_csv(sys.argv[1],names=('code_path','backend','device','grid_size','compute_fps'))
+    data = data[(data.grid_size>=4)]
+    data.device = data.backend + ', ' + data.device
     sortedDevices = getSortedDevices(data)
 
     deviceCodePath = {}
@@ -101,7 +110,7 @@ def main():
     plt.ylabel('Compute frames per second')
     plt.title('Collision Simulation Performance')
     plt.xlim(data.grid_size.min()-1, data.grid_size.max()+1)
-    plt.ylim(10,1000*(1.2*data.compute_fps.max()//1000))
+    plt.ylim(10,1000*(1.5*data.compute_fps.max()//1000))
     plt.legend(loc='upper left', bbox_to_anchor=(1, 1.02))
     plt.tight_layout()
     plt.yscale('log')

@@ -18,7 +18,7 @@ def getArgs():
     parser.add_argument('--gpu', metavar='GPU', action='append',
                         choices=[f'{backend}:{device}' for backend in
                                  ['cuda','hip','level_zero','opencl'] for device in
-                                 ['gpu','0','1','2']],
+                                 ['gpu','0','1','2','3']] + ['opencl:cpu'],
                         help='Execute on GPU with the given selector, '
                              'can be specified multiple times. Choose from: '
                              '%(choices)s')
@@ -33,6 +33,9 @@ def getArgs():
                         help='Output CSV file name, default: %(default)s')
     parser.add_argument('-b','--build', action='store_true',
                         help='If enabled, compile the project before executing')
+    parser.add_argument('-d','--buildDir', metavar='PATH',
+                        default='./build',
+                        help='Path to the build dir, default: %(default)s')
     parser.add_argument('--cuda', action='store_true',
                         help='Build including the CUDA target')
     parser.add_argument('--hip', action='store_true',
@@ -61,9 +64,10 @@ def getGpuNames(selectors):
     for sel in selectors:
         splitSel = sel.split(':')
         backend = splitSel[0]
-        deviceNumber = splitSel[-1] if splitSel[-1].isdecimal() else 0
-        formattedSelector = f'{backend}:gpu:{deviceNumber}'
-        pattern = re.compile(f'\[.*{formattedSelector}\] (.*), (.*) [0-9]+\.[0-9]+ \[.*\]')
+        deviceNumber = splitSel[-1] if splitSel[-1].isdecimal() else -1
+        deviceType = splitSel[-1] if splitSel[-1].isalpha() else 'gpu'
+        formattedSelector = f'{backend}:{deviceType}' + (f':{deviceNumber}' if deviceNumber>=0 else '')
+        pattern = re.compile(f'\[.*{formattedSelector}.*\] (.*), (.*) [0-9]+\.[0-9]+ \[.*\]')
         m = re.search(pattern, syclDevices)
         if m is None or len(m.groups()) < 2:
             raise RuntimeError(f'Failed to find "{formattedSelector}" in sycl-ls output')
@@ -121,7 +125,7 @@ def build(args):
         '-DCMAKE_BUILD_TYPE=Release',
         '-DENABLE_CUDA=ON' if args.cuda else '',
         '-DENABLE_HIP=ON' if args.hip else '',
-        '-B./build',
+        f'-B{args.buildDir}',
         '-G Ninja',
         '.'
     ])
@@ -131,7 +135,7 @@ def build(args):
         raise RuntimeError(f'CMake failed with code {out.returncode}: '
                            f'{cmd}\n{out.stdout.decode("utf-8")}')
     out = subprocess.run(
-        'cmake --build ./build -- -j4',
+        f'cmake --build {args.buildDir} -- -j4',
         shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if out.returncode != 0:
         raise RuntimeError(f'Build failed with code {out.returncode}: '
@@ -145,20 +149,22 @@ def main():
     if args.build:
         build(args)
 
-    baseCmd = './build/collision-sim'
+    baseCmd = f'{args.buildDir}/collision-sim'
 
     if args.cpu == 'true':
+        backend = 'cpp'
         cpuCmd = f'{baseCmd} --cpu'
         cpuName = getCpuName()
         meanCpu = getMeanOfNRuns(cpuCmd, numIters)
-        saveOutput(outputFile, f'sequential,{cpuName},{args.gridSize},{meanCpu:.2f}')
+        saveOutput(outputFile, f'sequential,{backend},{cpuName},{args.gridSize},{meanCpu:.2f}')
 
     if args.gpu:
         gpuNames = getGpuNames(args.gpu)
         for gpuSelector,gpuName in zip(args.gpu,gpuNames):
+            backend = gpuSelector.split(':')[0]
             gpuCmd = f'ONEAPI_DEVICE_SELECTOR={gpuSelector} {baseCmd}'
             meanGpu = getMeanOfNRuns(gpuCmd, numIters)
-            saveOutput(outputFile, f'parallel,{gpuName},{args.gridSize},{meanGpu:.2f}')
+            saveOutput(outputFile, f'parallel,{backend},{gpuName},{args.gridSize},{meanGpu:.2f}')
 
     return 0
 
