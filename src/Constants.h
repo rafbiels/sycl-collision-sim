@@ -60,7 +60,7 @@ constexpr static float DefaultDensity{1000.0f * Units::Density}; // kg/cm^3, app
 constexpr static float EarthGravity{-9.81f * Units::Distance / (Units::Time * Units::Time)}; // m/s^2
 
 /// Restitution coefficient (fraction of kinematic energy conserved in a collision)
-constexpr static float RestitutionCoefficient{0.98f};
+constexpr static float RestitutionCoefficient{1.0f};
 
 /// Narrow phase collision threshold for triangle-vertex distance between actors
 constexpr static float NarrowPhaseCollisionThreshold{0.001f*0.001f};

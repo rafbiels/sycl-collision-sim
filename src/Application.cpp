@@ -35,6 +35,8 @@ m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Constants::DefaultWorldDime
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFPSLongAvgSec{65536},
+m_avgNumOverlaps{Constants::FrameTimeCounterWindow},
+m_avgNumOverlapsLong{65536},
 m_computeTask{[this]{compute();}}
 {
     #if !HEADLESS
@@ -66,6 +68,7 @@ m_computeTask{[this]{compute();}}
             // Copy initial data to the device
             m_parallelState->copyAllToDeviceAsync();
             m_syclQueue->wait_and_throw();
+            Simulation::simulateParallel(0.0f, m_actors, m_parallelState.value(), m_syclQueue.value());
         } catch (const std::exception& ex) {
             Corrade::Utility::Error{} << "Exception caught: " << ex.what();
         }
@@ -77,9 +80,12 @@ m_computeTask{[this]{compute();}}
     m_textRenderer.newText("rfps",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.9f}));
-    m_textRenderer.newText("clock",
+    m_textRenderer.newText("opf",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.8f}));
+    m_textRenderer.newText("clock",
+        Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
+        Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.7f}));
 
     m_renderFrameTimer.reset();
     m_computeFrameTimer.reset();
@@ -93,6 +99,7 @@ CollisionSim::Application::~Application() {
     m_computeTask.stop();
     m_parallelState.reset(); // Free device memory
     Corrade::Utility::Debug{} << "Average compute FPS: " << m_computeFPSLongAvgSec.value();
+    Corrade::Utility::Debug{} << "Average AABB overlaps per frame: " << m_avgNumOverlapsLong.value();
 }
 
 #if !HEADLESS
@@ -114,8 +121,11 @@ void CollisionSim::Application::tickEvent() {
             m_computeFrameTimeSec.reset();
         }
         m_computeFPSLongAvgSec.add(cfps);
+        float avgNumOverlaps{m_avgNumOverlaps.value()};
+        m_avgNumOverlapsLong.add(avgNumOverlaps);
         m_textRenderer.get("cfps").renderer().render(Corrade::Utility::formatString("Compute FPS: {:.1f}", cfps));
         m_textRenderer.get("rfps").renderer().render(Corrade::Utility::formatString("Render FPS: {:.1f}", 1.0/m_renderFrameTimeSec.value()));
+        m_textRenderer.get("opf").renderer().render(Corrade::Utility::formatString("Overlaps/frame: {:.1f}", avgNumOverlaps));
         m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Sim time: {:.1f}s", wallTimeSec));
         m_renderFrameTimeSec.reset();
     }
@@ -179,8 +189,11 @@ int CollisionSim::Application::exec() {
             m_computeFrameTimeSec.reset();
         }
         m_computeFPSLongAvgSec.add(cfps);
-        Corrade::Utility::Debug{} << Corrade::Utility::format("Compute FPS: {:.1f}", cfps);
+        float avgNumOverlaps{m_avgNumOverlaps.value()};
+        m_avgNumOverlapsLong.add(avgNumOverlaps);
         Corrade::Utility::Debug{} << Corrade::Utility::format("Sim time: {:.1f}s", wallTimeSec);
+        Corrade::Utility::Debug{} << Corrade::Utility::format("Compute FPS: {:.1f}", cfps);
+        Corrade::Utility::Debug{} << Corrade::Utility::format("AABB overlaps per frame: {:.1f}", avgNumOverlaps);
     }
     }};
     // Skip the first frame from FPS counting to avoid including the overhead of the first kernel submission
@@ -223,8 +236,10 @@ void CollisionSim::Application::compute() {
     // Compute collisions and rigid body motion
     if (m_cpuOnly) {
         Simulation::simulateSequential(simDeltaTime, m_actors, m_sequentialState.value());
+        m_avgNumOverlaps.add(static_cast<float>(m_sequentialState->aabbOverlapsLastFrame));
     } else {
         Simulation::simulateParallel(simDeltaTime, m_actors, m_parallelState.value(), m_syclQueue.value());
+        m_avgNumOverlaps.add(static_cast<float>(m_parallelState->aabbOverlapsLastFrame));
     }
 }
 

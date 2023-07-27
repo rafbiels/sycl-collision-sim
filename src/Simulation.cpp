@@ -18,7 +18,7 @@
 namespace CollisionSim::Simulation {
 
 // -----------------------------------------------------------------------------
-void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
+void simulateMotionSequential(float dtime, std::vector<Actor>& actors, const Magnum::Range3D& worldBoundaries) {
     for (auto& actor : actors) {
         // ===========================================
         // Rigid body physics simulation based on D. Baraff 2001
@@ -45,6 +45,7 @@ void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
         Magnum::Matrix3 drot = star(actor.angularVelocity()) * rotation * dtime;
         Magnum::Vector3 dx = actor.linearVelocity() * dtime;
 
+
         Magnum::Matrix4 trf{
             {drot[0][0], drot[0][1], drot[0][2], 0.0f},
             {drot[1][0], drot[1][1], drot[1][2], 0.0f},
@@ -54,6 +55,17 @@ void simulateMotionSequential(float dtime, std::vector<Actor>& actors) {
 
         actor.transformation(actor.transformation() + trf);
         actor.updateVertexPositions();
+
+        // Protect actors from escaping the world
+        #pragma unroll
+        for (unsigned int axis{0}; axis<3; ++axis) {
+            actor.transformation()[3][0] = std::max(actor.transformation()[3][0], worldBoundaries.min()[0]);
+            actor.transformation()[3][0] = std::min(actor.transformation()[3][0], worldBoundaries.max()[0]);
+            actor.transformation()[3][1] = std::max(actor.transformation()[3][1], worldBoundaries.min()[1]);
+            actor.transformation()[3][1] = std::min(actor.transformation()[3][1], worldBoundaries.max()[1]);
+            actor.transformation()[3][2] = std::max(actor.transformation()[3][2], worldBoundaries.min()[2]);
+            actor.transformation()[3][2] = std::min(actor.transformation()[3][2], worldBoundaries.max()[2]);
+        }
 
         // Reset force and torque
         actor.force({0, 0, 0});
@@ -133,7 +145,7 @@ void collideWorldSequential(std::vector<Actor>& actors, const Magnum::Range3D& w
         actor.addVelocity(addLinearV, addAngularV);
         const float vy{actor.linearVelocity().y()};
         // TODO: implement better resting condition
-        if (normal.y() > 0 && vy > 0 && vy < 0.1) {
+        if (normal.y() > 0 && vy > 0 && vy < 0.01) {
             actor.addVelocity({0.0f, -1.0f*vy, 0.0f}, {0.0f, 0.0f, 0.0f});
         }
     }
@@ -197,6 +209,7 @@ void collideBroadSequential(std::vector<Actor>& actors, SequentialState& state) 
             state.aabbOverlaps.insert(overlap);
         }
     }
+    state.aabbOverlapsLastFrame = state.aabbOverlaps.size();
 }
 
 // -----------------------------------------------------------------------------
@@ -328,7 +341,7 @@ void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState
         // Fix floating point loss of orthogonality in the rotation matrix
         Util::orthonormaliseRotation(actor.transformation());
     }
-    simulateMotionSequential(dtime, actors);
+    simulateMotionSequential(dtime, actors, state.worldBoundaries);
     collideWorldSequential(actors, state.worldBoundaries);
     collideBroadSequential(actors, state);
     collideNarrowSequential(actors, state);
@@ -337,6 +350,10 @@ void simulateSequential(float dtime, std::vector<Actor>& actors, SequentialState
 // -----------------------------------------------------------------------------
 void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& state, sycl::queue& queue) {
     using float3x3 = CollisionSim::ParallelState::float3x3;
+
+    // Reset collision counter
+    state.aabbOverlapsLastFrame = 0;
+
     // Copy inputs from Actor objects to serial state data
     for (size_t iActor{0}; iActor<Constants::NumActors; ++iActor) {
         state.linearVelocity.hostContainer[iActor] = Util::toSycl(actors[iActor].linearVelocity());
@@ -410,6 +427,17 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
 
                 // Apply translation
                 translation[id] += linearVelocity[id] * dtime;
+
+                // Protect actors from escaping the world
+                #pragma unroll
+                for (unsigned int axis{0}; axis<3; ++axis) {
+                    translation[id][0] = sycl::max(translation[id][0], worldBoundaries[0]);
+                    translation[id][0] = sycl::min(translation[id][0], worldBoundaries[1]);
+                    translation[id][1] = sycl::max(translation[id][1], worldBoundaries[2]);
+                    translation[id][1] = sycl::min(translation[id][1], worldBoundaries[3]);
+                    translation[id][2] = sycl::max(translation[id][2], worldBoundaries[4]);
+                    translation[id][2] = sycl::min(translation[id][2], worldBoundaries[5]);
+                }
 
                 // Apply rotation
                 auto star = [](const sycl::float3& v) constexpr {
@@ -620,6 +648,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
             if (state.pairedActorIndices.hostContainer[pair.first]==pair.second ||
                 state.pairedActorIndices.hostContainer[pair.second]==pair.first) {
+                ++state.aabbOverlapsLastFrame;
                 for (size_t iActor : {pair.first, pair.second}) {
                     if (overlappingActors.insert(iActor).second) {
                         numTrianglesToCheck += state.numTriangles.hostContainer[iActor];
@@ -705,7 +734,14 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                         }
                         result.pointOnTriangle = Util::mvmul(negRot, result.pointOnTriangle) + triangle[0];
                         result.normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
-                        result.normal /= sycl::length(result.normal);
+                        float normalisation{sycl::length(result.normal)};
+                        if (normalisation==0) {
+                            // Degenerate triangle - make sure it doesn't make it down the computation
+                            // It is not skipped earlier to avoid thread divergence
+                            result.dsq = std::numeric_limits<float>::max();
+                        } else {
+                            result.normal /= normalisation;
+                        }
                         sycl::float3 radius{result.pointOnTriangle - translation[iActor]};
                         float direction = (sycl::dot(result.normal, radius) < 0) ? -1.0f : 1.0f;
                         result.normal *= direction;
@@ -863,7 +899,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
 
         const float vy{actors[iActor].linearVelocity().y()};
         // TODO: implement better resting condition
-        if ((data.type & Wall::Ymin) > 0 && vy > 0 && vy < 0.1) {
+        if ((data.type & Wall::Ymin) > 0 && vy > 0 && vy < 0.01) {
             actors[iActor].addVelocity({0.0f, 0.0001f-1.0f*vy, 0.0f}, {0.0f, 0.0f, 0.0f});
         }
     }

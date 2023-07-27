@@ -64,6 +64,8 @@ class Application final : public Magnum::Platform::Application
         Util::MovingAverage<float> m_renderFrameTimeSec;
         Util::MovingAverage<float> m_computeFrameTimeSec;
         Util::MovingAverage<float> m_computeFPSLongAvgSec;
+        Util::MovingAverage<float> m_avgNumOverlaps;
+        Util::MovingAverage<float> m_avgNumOverlapsLong;
         std::mutex m_computeFrameTimeSecMutex;
         /// Constant count of all vertices calculated at initialisation
         size_t m_numAllVertices{0};

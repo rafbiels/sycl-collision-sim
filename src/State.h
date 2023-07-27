@@ -106,6 +106,7 @@ class ParallelState {
         USMData<bool,Constants::NumActorPairs> aabbOverlaps;
         USMData<int,Constants::NumActors> pairedActorIndices;
         USMData<int,Constants::NumActors> actorImpulseApplied; /// Lock to avoid concurrent collisions
+        size_t aabbOverlapsLastFrame{0};
         ///@}
 };
 
@@ -134,6 +135,7 @@ class SequentialState {
             edgeArray(std::make_index_sequence<Constants::NumActors>{}), // z
         };
         Util::OverlapSet aabbOverlaps;
+        size_t aabbOverlapsLastFrame{0};
         ///}
 };
 
