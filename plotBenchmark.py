@@ -58,8 +58,8 @@ def deviceColour(deviceName):
 
 
 def translateLabel(label):
-    d = {
-        'parallel': 'parallel SYCL',
+    deviceDict = {
+        'parallel': 'SYCL',
         'sequential': 'sequential C++',
         '11th Gen Intel(R) Core(TM) i9-11900K @ 3.50GHz': 'Intel Core i9-11900K',
         '12th Gen Intel(R) Core(TM) i9-12900K': 'Intel Core i9-12900K',
@@ -72,12 +72,15 @@ def translateLabel(label):
     backendDict = {
         'cpp, ': '',
         'cuda': 'CUDA',
+        'hip': 'HIP',
         'level_zero': 'Level Zero',
         'opencl': 'OpenCL',
     }
+    for k,v in deviceDict.items():
+        label = label.replace(k,v)
     for k,v in backendDict.items():
         label = label.replace(k,v)
-    return d.get(label,label)
+    return label
 
 
 def main():
