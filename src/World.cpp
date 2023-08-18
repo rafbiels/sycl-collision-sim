@@ -20,7 +20,7 @@ m_walls{Shape{Magnum::Primitives::planeSolid()},
 {
     using namespace Magnum::Math::Literals;
     m_projection = Magnum::Matrix4::perspectiveProjection(90.0_degf, windowAspectRatio, 0.01, 100.0)
-        * Magnum::Matrix4::translation(Magnum::Vector3::zAxis(-1.7*Constants::DefaultWorldDimensions[2]))
+        * Magnum::Matrix4::translation(Magnum::Vector3::zAxis(-1.7*dimensions[2]))
         * Magnum::Matrix4::rotationY(-20.0_degf);
 
     // Alias for readability

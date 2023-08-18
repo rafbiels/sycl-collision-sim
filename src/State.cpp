@@ -5,7 +5,7 @@
  */
 
 #include "State.h"
-#include "Util.h"
+#include "Actor.h"
 #include <algorithm>
 
 // -----------------------------------------------------------------------------

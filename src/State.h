@@ -7,7 +7,6 @@
 #ifndef COLLISION_SIM_STATE
 #define COLLISION_SIM_STATE
 
-#include "Actor.h"
 #include "Constants.h"
 #include "USMData.h"
 #include "Util.h"
@@ -20,6 +19,8 @@
 #include <utility>
 
 namespace CollisionSim {
+
+class Actor;
 
 struct Edge {
     uint16_t actorIndex{std::numeric_limits<uint16_t>::max()};

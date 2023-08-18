@@ -7,7 +7,6 @@
 #ifndef COLLISION_SIM_APPLICATION
 #define COLLISION_SIM_APPLICATION
 
-#include "Actor.h"
 #include "TextRenderer.h"
 #include "Util.h"
 #include "State.h"
@@ -27,6 +26,9 @@
 #include <mutex>
 
 namespace CollisionSim {
+
+class Actor;
+
 #if HEADLESS
 class Application : public Magnum::Platform::WindowlessGlxApplication
 #else

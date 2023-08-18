@@ -7,7 +7,6 @@
 #ifndef COLLISION_SIM_TEXTRENDERER
 #define COLLISION_SIM_TEXTRENDERER
 
-#include <Magnum/Shaders/Shaders.h>
 #include <Magnum/Text/Alignment.h>
 #include <Magnum/Text/Renderer.h>
 #include <Magnum/Text/AbstractFont.h>

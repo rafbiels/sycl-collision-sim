@@ -13,7 +13,6 @@
 #include <Magnum/Math/Matrix4.h>
 #include <Magnum/Math/Range.h>
 #include <Magnum/Trade/MeshData.h>
-#include <array>
 #include <vector>
 
 namespace CollisionSim {

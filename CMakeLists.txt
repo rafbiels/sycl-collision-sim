@@ -77,17 +77,19 @@ add_compile_definitions(ACTOR_GRID_SIZE=${ACTOR_GRID_SIZE})
 # ------------------------------------------------
 # Configure compilation flags
 # ------------------------------------------------
+# set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mtune=native -fsycl -fsycl-targets=${SYCL_TARGETS}")
-if(${ENABLE_CUDA})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xsycl-target-backend=nvptx64-nvidia-cuda --offload-arch=sm_${CUDA_COMPUTE_CAPABILITY}")
-endif()
-if(${ENABLE_HIP})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xsycl-target-backend=amdgcn-amd-amdhsa --offload-arch=${HIP_GFX_ARCH}")
-endif()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mtune=native")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1")
+set(SYCL_FLAGS -fsycl -fsycl-targets=${SYCL_TARGETS})
+if(${ENABLE_CUDA})
+    set(SYCL_FLAGS ${SYCL_FLAGS} -Xsycl-target-backend=nvptx64-nvidia-cuda --offload-arch=sm_${CUDA_COMPUTE_CAPABILITY})
+endif()
+if(${ENABLE_HIP})
+    set(SYCL_FLAGS ${SYCL_FLAGS} -Xsycl-target-backend=amdgcn-amd-amdhsa --offload-arch=${HIP_GFX_ARCH})
+endif()
 
 # ------------------------------------------------
 # Configure Magnum/Corrade
@@ -98,23 +100,55 @@ find_package(Magnum
 corrade_add_resource(CollisionSim_RESOURCES assets/resources.conf)
 
 # ------------------------------------------------
+# Configure the sources and linking for individual objects
+# ------------------------------------------------
+# Targets with SYCL dependency
+add_library(Util OBJECT src/Util.cpp)
+target_compile_options(Util PUBLIC ${SYCL_FLAGS})
+target_link_libraries(Util
+    PUBLIC Magnum::Magnum)
+
+add_library(State OBJECT src/State.cpp)
+target_compile_options(State PUBLIC ${SYCL_FLAGS})
+target_link_libraries(State
+    PUBLIC Util Magnum::Magnum
+    PRIVATE Actor)
+
+add_library(Simulation OBJECT src/Simulation.cpp)
+target_compile_options(Simulation PUBLIC ${SYCL_FLAGS})
+target_link_libraries(Simulation
+    PRIVATE Util Actor
+    PUBLIC State)
+
+# Targets without SYCL dependency
+add_library(Shape OBJECT src/Shape.cpp)
+target_link_libraries(Shape
+    PUBLIC Magnum::Magnum Magnum::GL)
+
+add_library(Actor OBJECT src/Actor.cpp)
+target_link_libraries(Actor
+    PRIVATE Util
+    PUBLIC Shape Magnum::Magnum Magnum::Primitives)
+
+add_library(TextRenderer OBJECT src/TextRenderer.cpp)
+target_link_libraries(TextRenderer
+    PUBLIC Magnum::Magnum Magnum::Text Magnum::MagnumFont)
+
+add_library(World OBJECT src/World.cpp)
+target_link_libraries(World
+    PUBLIC Shape Magnum::Magnum Magnum::Primitives)
+
+# ------------------------------------------------
 # Configure the sources and linking for the executable
 # ------------------------------------------------
 add_executable(collision-sim src/Application.cpp
-    src/Actor.cpp
-    src/Shape.cpp
-    src/Simulation.cpp
-    src/State.cpp
-    src/TextRenderer.cpp
-    src/Util.cpp
-    src/World.cpp
     ${CollisionSim_RESOURCES})
 
-target_link_libraries(collision-sim PRIVATE
+target_link_libraries(collision-sim
+    PRIVATE
+    Actor Shape Simulation State TextRenderer Util World
     ${MagnumApplicationLibrary}
-    Magnum::GL
-    Magnum::Magnum
-    Magnum::Primitives
-    Magnum::Shaders
-    Magnum::Text
-    Magnum::MagnumFont)
+    Magnum::GL Magnum::Magnum Magnum::Shaders)
+
+target_compile_options(collision-sim PUBLIC ${SYCL_FLAGS})
+target_link_options(collision-sim PUBLIC ${SYCL_FLAGS})

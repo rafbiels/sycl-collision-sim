@@ -7,11 +7,15 @@
 #ifndef COLLISION_SIM_CONSTANTS
 #define COLLISION_SIM_CONSTANTS
 
-#include "Util.h"
-#include <Magnum/Magnum.h>
-#include <Magnum/Math/Vector3.h>
+#include <array>
 #include <chrono>
 #include <string_view>
+
+namespace CollisionSim {
+    using clock_t = std::chrono::steady_clock;
+    using time_point_t = clock_t::time_point;
+    using duration_t = clock_t::duration;
+}
 
 namespace CollisionSim::Constants {
 
@@ -19,10 +23,10 @@ namespace CollisionSim::Constants {
 constexpr static std::string_view ApplicationName{"Collision Simulation"};
 
 /// Minimum amount of time between two calls to compute state of the simulation
-constexpr static Util::Timer::duration_t ComputeInterval{std::chrono::microseconds{0}};
+constexpr static duration_t ComputeInterval{std::chrono::microseconds{0}};
 
 /// Minimum amount of time between two updates of the on-screen text (e.g. FPS counter)
-constexpr static Util::Timer::duration_t TextUpdateInterval{std::chrono::milliseconds{200}};
+constexpr static duration_t TextUpdateInterval{std::chrono::milliseconds{200}};
 
 /// Number of measurements to keep for averaging the FPS measurement
 constexpr static size_t FrameTimeCounterWindow{2048};
@@ -51,7 +55,7 @@ constexpr static float Velocity{Distance/Time}; // cm/s
 }
 
 /// Default dimensions of the world
-constexpr static Magnum::Vector3 DefaultWorldDimensions{10.0f,8.0f,10.0f};
+constexpr static std::array<float,3> DefaultWorldDimensions{10.0f,8.0f,10.0f};
 
 /// Uniform density of the body materials
 constexpr static float DefaultDensity{1000.0f * Units::Density}; // kg/cm^3, approx. water density

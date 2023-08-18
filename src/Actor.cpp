@@ -6,12 +6,18 @@
 
 #include "Actor.h"
 #include "Constants.h"
-#include "Util.h"
 #include <Magnum/MeshTools/Transform.h>
 #include <Magnum/Primitives/Cone.h>
 #include <Magnum/Primitives/Cube.h>
 #include <Magnum/Primitives/Cylinder.h>
 #include <Magnum/Primitives/Icosphere.h>
+
+namespace CollisionSim::Util {
+Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b);
+float round(float x);
+Magnum::Vector3 round(const Magnum::Vector3& v);
+Magnum::Matrix3 round(const Magnum::Matrix3& m);
+}
 
 namespace {
 Magnum::Trade::MeshData scaledMesh(Magnum::Trade::MeshData&& meshData, float scale) {

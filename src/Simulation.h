@@ -7,12 +7,15 @@
 #ifndef COLLISION_SIM_SIMULATION
 #define COLLISION_SIM_SIMULATION
 
-#include "Actor.h"
 #include "State.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Range.h>
 #include <sycl/sycl.hpp>
 #include <vector>
+
+namespace CollisionSim {
+class Actor;
+}
 
 namespace CollisionSim::Simulation {
 

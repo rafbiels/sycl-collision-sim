@@ -16,19 +16,19 @@ void Timer::reset() {
 }
 
 // -----------------------------------------------------------------------------
-Timer::duration_t Timer::step() {
+duration_t Timer::step() {
     time_point_t previousTime = m_currentTime;
     m_currentTime = clock_t::now();
     return m_currentTime - previousTime;
 }
 
 // -----------------------------------------------------------------------------
-Timer::duration_t Timer::peek() const {
+duration_t Timer::peek() const {
     return clock_t::now() - m_currentTime;
 }
 
 // -----------------------------------------------------------------------------
-bool Timer::stepIfElapsed(Timer::duration_t duration) {
+bool Timer::stepIfElapsed(duration_t duration) {
     if (peek() < duration) {return false;}
     reset();
     return true;
@@ -44,7 +44,7 @@ RepeatTask::~RepeatTask() {
 }
 
 // -----------------------------------------------------------------------------
-void RepeatTask::start(Timer::duration_t interval) {
+void RepeatTask::start(duration_t interval) {
     if (m_thread!=nullptr) {
         throw std::runtime_error("RepeatTask::start called on already running task");
     }
@@ -65,8 +65,8 @@ void RepeatTask::stop() {
 // -----------------------------------------------------------------------------
 void RepeatTask::run() {
     while (m_keepRunning) {
-        Timer::duration_t timeLeft{m_interval - m_timer.peek()};
-        if (timeLeft < Timer::duration_t{0}) {
+        duration_t timeLeft{m_interval - m_timer.peek()};
+        if (timeLeft < duration_t{0}) {
             m_timer.reset();
             m_callback();
         } else {

@@ -7,6 +7,7 @@
 #ifndef COLLISION_SIM_UTIL
 #define COLLISION_SIM_UTIL
 
+#include "Constants.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Vector3.h>
 #include <Magnum/Math/Vector4.h>
@@ -16,7 +17,6 @@
 #include <chrono>
 #include <deque>
 #include <numeric>
-#include <numbers>
 #include <memory>
 #include <thread>
 #include <functional>
@@ -27,9 +27,6 @@ namespace CollisionSim::Util {
 
 class Timer {
     public:
-        using clock_t = std::chrono::steady_clock;
-        using time_point_t = clock_t::time_point;
-        using duration_t = clock_t::duration;
         /**
          * Reset the stored time to now()
          */
@@ -61,12 +58,12 @@ class RepeatTask {
         RepeatTask(RepeatTask&&) = delete;
         RepeatTask& operator=(const RepeatTask&) = delete;
         RepeatTask& operator=(RepeatTask&&) = delete;
-        void start(Timer::duration_t interval);
+        void start(duration_t interval);
         void stop();
     private:
         void run();
         Timer m_timer;
-        Timer::duration_t m_interval{0};
+        duration_t m_interval{0};
         std::unique_ptr<std::thread> m_thread;
         std::function<void()> m_callback;
         bool m_keepRunning{true};
@@ -126,6 +123,10 @@ constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
 }
 template<typename T>
 constexpr Magnum::Math::Vector<3,T> toMagnum(const sycl::vec<T,3>& vec) {
+    return {vec[0],vec[1],vec[2]};
+}
+template<typename T>
+constexpr Magnum::Math::Vector<3,T> toMagnum(const std::array<T,3>& vec) {
     return {vec[0],vec[1],vec[2]};
 }
 constexpr Magnum::Matrix3 toMagnum(const std::array<sycl::float3,3>& mat) {

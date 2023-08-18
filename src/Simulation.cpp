@@ -5,6 +5,7 @@
  */
 
 #include "Simulation.h"
+#include "Actor.h"
 #include "Constants.h"
 #include "Util.h"
 #include "Wall.h"
