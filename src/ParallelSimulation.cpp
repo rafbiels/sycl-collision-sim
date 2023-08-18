@@ -5,6 +5,7 @@
  */
 
 #include "ParallelSimulation.h"
+#include "ParallelState.h"
 #include "Actor.h"
 #include "Constants.h"
 #include "Util.h"
@@ -18,10 +19,543 @@
 #include <unordered_set>
 
 namespace CollisionSim::Simulation {
+using float3x3 = CollisionSim::ParallelState::float3x3;
+
+/// Compute motion step and reset per-actor temporary data
+class ActorKernel {
+private:
+    float m_dtime{0.0f};
+    float* m_worldBoundaries{nullptr};
+    float* m_mass{nullptr};
+    sycl::float3* m_linearVelocity{nullptr};
+    float3x3* m_inertiaInv{nullptr};
+    sycl::float3* m_translation{nullptr};
+    float3x3* m_bodyInertiaInv{nullptr};
+    sycl::float3* m_angularVelocity{nullptr};
+    float3x3* m_rotation{nullptr};
+    sycl::float3* m_force{nullptr};
+    sycl::float3* m_torque{nullptr};
+    int* m_pairedActorIndices{nullptr};
+    int* m_actorImpulseApplied{nullptr};
+
+public:
+    constexpr explicit ActorKernel(float dtime, const ParallelState& state) noexcept
+    : m_dtime{dtime},
+      m_worldBoundaries{state.worldBoundaries.devicePointer},
+      m_mass{state.mass.devicePointer},
+      m_linearVelocity{state.linearVelocity.devicePointer},
+      m_inertiaInv{state.inertiaInv.devicePointer},
+      m_translation{state.translation.devicePointer},
+      m_bodyInertiaInv{state.bodyInertiaInv.devicePointer},
+      m_angularVelocity{state.angularVelocity.devicePointer},
+      m_rotation{state.rotation.devicePointer},
+      m_force{state.force.devicePointer},
+      m_torque{state.torque.devicePointer},
+      m_pairedActorIndices{state.pairedActorIndices.devicePointer},
+      m_actorImpulseApplied{state.actorImpulseApplied.devicePointer}
+    {}
+
+    void operator()(sycl::id<1> id) const {
+        // Compute linear and angular momentum
+        auto linearMomentum = m_mass[id] * m_linearVelocity[id];
+        auto angularMomentum = Util::mvmul(Util::inverse(m_inertiaInv[id]), m_angularVelocity[id]);
+
+        linearMomentum += m_force[id] * m_dtime;
+        angularMomentum += m_torque[id] * m_dtime;
+
+        // Compute linear and angular velocity
+        m_linearVelocity[id] = linearMomentum / m_mass[id];
+        m_inertiaInv[id] = Util::mmul(
+            Util::mmul(m_rotation[id], m_bodyInertiaInv[id]),
+            Util::transpose(m_rotation[id])); // R * Ib^-1 * R^T
+        m_angularVelocity[id] = Util::mvmul(m_inertiaInv[id], angularMomentum);
+
+        // Apply translation
+        m_translation[id] += m_linearVelocity[id] * m_dtime;
+
+        // Protect actors from escaping the world
+        #pragma unroll
+        for (unsigned int axis{0}; axis<3; ++axis) {
+            m_translation[id][0] = sycl::max(m_translation[id][0], m_worldBoundaries[0]);
+            m_translation[id][0] = sycl::min(m_translation[id][0], m_worldBoundaries[1]);
+            m_translation[id][1] = sycl::max(m_translation[id][1], m_worldBoundaries[2]);
+            m_translation[id][1] = sycl::min(m_translation[id][1], m_worldBoundaries[3]);
+            m_translation[id][2] = sycl::max(m_translation[id][2], m_worldBoundaries[4]);
+            m_translation[id][2] = sycl::min(m_translation[id][2], m_worldBoundaries[5]);
+        }
+
+        // Apply rotation
+        auto star = [](const sycl::float3& v) constexpr {
+            return std::array<sycl::float3,3>{
+                sycl::float3{ 0.0f,  v[2], -v[1]},
+                sycl::float3{-v[2],  0.0f,  v[0]},
+                sycl::float3{ v[1], -v[0],  0.0f}
+            };
+        };
+        std::array<sycl::float3,3> drot = Util::msmul(
+            Util::mmul(star(m_angularVelocity[id]), m_rotation[id]),
+            m_dtime);
+        m_rotation[id][0] += drot[0];
+        m_rotation[id][1] += drot[1];
+        m_rotation[id][2] += drot[2];
+
+        // Reset AABB pairing info and impulse lock
+        m_pairedActorIndices[id] = -1;
+        m_actorImpulseApplied[id] = 0;
+    }
+};
+
+/// Update vertex positions and calculate world collisions
+class VertexKernel {
+private:
+    float* m_worldBoundaries{nullptr};
+    float* m_mass{nullptr};
+    uint16_t* m_actorIndices{nullptr};
+    sycl::float3* m_linearVelocity{nullptr};
+    float3x3* m_inertiaInv{nullptr};
+    sycl::float3* m_translation{nullptr};
+    sycl::float3* m_addLinearVelocity{nullptr};
+    sycl::float3* m_addAngularVelocity{nullptr};
+    Wall* m_wallCollisions{nullptr};
+    sycl::float3* m_bodyVertices{nullptr};
+    sycl::float3* m_worldVertices{nullptr};
+    float3x3* m_rotation{nullptr};
+
+public:
+    constexpr explicit VertexKernel(const ParallelState& state) noexcept
+    : m_worldBoundaries{state.worldBoundaries.devicePointer},
+      m_mass{state.mass.devicePointer},
+      m_actorIndices{state.actorIndices.devicePointer},
+      m_linearVelocity{state.linearVelocity.devicePointer},
+      m_inertiaInv{state.inertiaInv.devicePointer},
+      m_translation{state.translation.devicePointer},
+      m_addLinearVelocity{state.addLinearVelocity.devicePointer},
+      m_addAngularVelocity{state.addAngularVelocity.devicePointer},
+      m_wallCollisions{state.wallCollisions.devicePointer},
+      m_bodyVertices{state.bodyVertices.devicePointer},
+      m_worldVertices{state.worldVertices.devicePointer},
+      m_rotation{state.rotation.devicePointer}
+    {}
+
+    void operator()(sycl::id<1> id) const {
+        uint16_t iActor = m_actorIndices[id];
+
+        m_worldVertices[id] = sycl::float3{
+            // x
+            m_rotation[iActor][0][0]*m_bodyVertices[id][0] +
+            m_rotation[iActor][1][0]*m_bodyVertices[id][1] +
+            m_rotation[iActor][2][0]*m_bodyVertices[id][2] +
+            m_translation[iActor][0],
+            // y
+            m_rotation[iActor][0][1]*m_bodyVertices[id][0] +
+            m_rotation[iActor][1][1]*m_bodyVertices[id][1] +
+            m_rotation[iActor][2][1]*m_bodyVertices[id][2] +
+            m_translation[iActor][1],
+            // z
+            m_rotation[iActor][0][2]*m_bodyVertices[id][0] +
+            m_rotation[iActor][1][2]*m_bodyVertices[id][1] +
+            m_rotation[iActor][2][2]*m_bodyVertices[id][2] +
+            m_translation[iActor][2]
+        };
+
+        Wall collision{Wall::None};
+        collision |= (static_cast<WallUnderlyingType>(m_worldVertices[id][0] <= m_worldBoundaries[0]) << 0);
+        collision |= (static_cast<WallUnderlyingType>(m_worldVertices[id][0] >= m_worldBoundaries[1]) << 1);
+        collision |= (static_cast<WallUnderlyingType>(m_worldVertices[id][1] <= m_worldBoundaries[2]) << 2);
+        collision |= (static_cast<WallUnderlyingType>(m_worldVertices[id][1] >= m_worldBoundaries[3]) << 3);
+        collision |= (static_cast<WallUnderlyingType>(m_worldVertices[id][2] <= m_worldBoundaries[4]) << 4);
+        collision |= (static_cast<WallUnderlyingType>(m_worldVertices[id][2] >= m_worldBoundaries[5]) << 5);
+
+        sycl::float3 normal = wallNormal(collision);
+        sycl::float3 radius{m_worldVertices[id] - m_translation[iActor]};
+        sycl::float3 a{sycl::cross(radius, normal)};
+        sycl::float3 b{Util::mvmul(m_inertiaInv[iActor], a)};
+        sycl::float3 c{sycl::cross(b, radius)};
+        float d{sycl::dot(c, normal)};
+        float impulse = (-1.0f - Constants::RestitutionCoefficient) *
+                        sycl::dot(m_linearVelocity[iActor], normal) /
+                        (1.0f/m_mass[iActor] + d);
+
+        m_addLinearVelocity[id] = (impulse / m_mass[iActor]) * normal;
+        m_addAngularVelocity[id] = impulse * b;
+        bool ignoreAwayFromWall{sycl::dot(m_linearVelocity[iActor], normal) > 0.0f};
+        m_wallCollisions[id] = static_cast<Wall>(
+            static_cast<WallUnderlyingType>(collision) *
+            static_cast<WallUnderlyingType>(!ignoreAwayFromWall));
+    }
+};
+
+/// Calculate the axis-align bounding boxes for each actor
+///
+/// The use of sycl::joint_reduce requires 1D arrays of vx, vy, vz
+/// so we copy the AoS global memory vertices into local memory SoA
+class AABBKernel {
+private:
+    uint16_t* m_numVertices{nullptr};
+    uint32_t* m_verticesOffset{nullptr};
+    sycl::float3* m_bodyVertices{nullptr};
+    sycl::float3* m_worldVertices{nullptr};
+    std::array<sycl::float2*,3> m_aabb{nullptr};
+    std::array<sycl::local_accessor<float,1>,3> m_localVertices{};
+
+public:
+    constexpr static size_t workGroupSize{32};
+
+    explicit AABBKernel(sycl::handler& cgh, const ParallelState& state) noexcept
+    : m_numVertices{state.numVertices.devicePointer},
+      m_verticesOffset{state.verticesOffset.devicePointer},
+      m_bodyVertices{state.bodyVertices.devicePointer},
+      m_worldVertices{state.worldVertices.devicePointer},
+      m_aabb{state.aabb[0].devicePointer, state.aabb[1].devicePointer, state.aabb[2].devicePointer},
+      m_localVertices{sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
+                      sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
+                      sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh}}
+    {}
+
+    void operator()(sycl::nd_item<1> item) const {
+        size_t iActor = item.get_group_linear_id();
+
+        sycl::float3* actorVertices = m_worldVertices + m_verticesOffset[iActor];
+        size_t numVerticesPerThread{1 + m_numVertices[iActor]/workGroupSize};
+        for (size_t i{0}; i<numVerticesPerThread; ++i) {
+            size_t iVertex{item.get_local_linear_id() * numVerticesPerThread + i};
+            if (iVertex<m_numVertices[iActor]) {
+                m_localVertices[0][iVertex] = actorVertices[iVertex][0];
+                m_localVertices[1][iVertex] = actorVertices[iVertex][1];
+                m_localVertices[2][iVertex] = actorVertices[iVertex][2];
+            }
+        }
+
+        sycl::group_barrier(item.get_group());
+
+        #pragma unroll
+        for (unsigned int axis{0}; axis<3; ++axis) {
+            m_aabb[axis][iActor] = sycl::float2{
+                sycl::joint_reduce(
+                    item.get_group(),
+                    m_localVertices[axis].begin(),
+                    m_localVertices[axis].begin()+m_numVertices[iActor],
+                    sycl::minimum{}),
+                sycl::joint_reduce(
+                    item.get_group(),
+                    m_localVertices[axis].begin(),
+                    m_localVertices[axis].begin()+m_numVertices[iActor],
+                    sycl::maximum{})
+            };
+        }
+    }
+};
+
+/// Sort the AABB edges using odd-even merge-sort
+///
+/// Given the small size of the problem we can avoid submitting N(=2*NumActors) kernels.
+/// Instead, we can submit one kernel with a single work-group per axis and exploit a work-group barrier.
+/// This requires that N is smaller than the maximum work-group size of the GPU we're using.
+class AABBSortKernel {
+private:
+    std::array<sycl::float2*,3> m_aabb{nullptr};
+    std::array<Edge*,3> m_sortedAABBEdges{nullptr};
+
+public:
+    constexpr explicit AABBSortKernel(const ParallelState& state) noexcept
+    : m_aabb{state.aabb[0].devicePointer,
+             state.aabb[1].devicePointer,
+             state.aabb[2].devicePointer},
+      m_sortedAABBEdges{state.sortedAABBEdges[0].devicePointer,
+                        state.sortedAABBEdges[1].devicePointer,
+                        state.sortedAABBEdges[2].devicePointer}
+    {}
+
+    void operator()(sycl::nd_item<1> item) const {
+        size_t axis = item.get_group_linear_id();
+        size_t id = item.get_local_linear_id();
+        auto edgeValue = [&axis, this](Edge e) constexpr -> float {
+            return e.isEnd ? m_aabb[axis][e.actorIndex][1] : m_aabb[axis][e.actorIndex][0];
+        };
+        auto edgeGreater = [&edgeValue](Edge edgeA, Edge edgeB) constexpr -> bool {
+            return edgeValue(edgeA) > edgeValue(edgeB);
+        };
+        auto compareExchange = [&edgeGreater](Edge& edgeA, Edge& edgeB) constexpr -> void {
+            if (edgeGreater(edgeA,edgeB)) {std::swap(edgeA, edgeB);}
+        };
+        for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
+            size_t i = id * 2 + step%2;
+            if ((i+1) < (2*Constants::NumActors)) {
+                compareExchange(m_sortedAABBEdges[axis][i], m_sortedAABBEdges[axis][i+1]);
+            }
+            sycl::group_barrier(item.get_group());
+        }
+    }
+};
+
+/// Find overlapping AABB pairs
+class AABBOverlapKernel {
+private:
+    std::array<Edge*,3> m_sortedAABBEdges{nullptr};
+    bool* m_aabbOverlaps{nullptr};
+    int* m_pairedActorIndices{nullptr};
+
+public:
+    constexpr explicit AABBOverlapKernel(const ParallelState& state) noexcept
+    : m_sortedAABBEdges{state.sortedAABBEdges[0].devicePointer,
+                        state.sortedAABBEdges[1].devicePointer,
+                        state.sortedAABBEdges[2].devicePointer},
+      m_aabbOverlaps{state.aabbOverlaps.devicePointer},
+      m_pairedActorIndices{state.pairedActorIndices.devicePointer}
+    {}
+
+    void operator()(sycl::id<1> id) const {
+        size_t iActorA{Constants::ActorPairs[id].first};
+        size_t iActorB{Constants::ActorPairs[id].second};
+        sycl::int3 posStartA{-1};
+        sycl::int3 posStartB{-1};
+        sycl::int3 posEndA{-1};
+        sycl::int3 posEndB{-1};
+        for (int iEdge{0}; iEdge<static_cast<int>(2*Constants::NumActors); ++iEdge) {
+            #pragma unroll
+            for (int axis{0}; axis<3; ++axis) {
+                const Edge& edge{m_sortedAABBEdges[axis][iEdge]};
+                if (edge.actorIndex==iActorA) {
+                    if (edge.isEnd) {posEndA[axis] = iEdge;}
+                    else {posStartA[axis] = iEdge;}
+                } else if (edge.actorIndex==iActorB) {
+                    if (edge.isEnd) {posEndB[axis] = iEdge;}
+                    else {posStartB[axis] = iEdge;}
+                }
+            }
+        }
+        auto overlap = [](int a1, int a2, int b1, int b2) constexpr -> bool {
+            return (a1 < b1 && b1 < a2) || (b1 < a1 && a1 < b2);
+        };
+        m_aabbOverlaps[id] = (
+            overlap(posStartA[0], posEndA[0], posStartB[0], posEndB[0]) &&
+            overlap(posStartA[1], posEndA[1], posStartB[1], posEndB[1]) &&
+            overlap(posStartA[2], posEndA[2], posStartB[2], posEndB[2])
+        );
+        if (m_aabbOverlaps[id]) {
+            m_pairedActorIndices[iActorA] = static_cast<int>(iActorB);
+            m_pairedActorIndices[iActorB] = static_cast<int>(iActorA);
+        }
+    }
+};
+
+/// For each triangle, find the closest vertex from another actor
+class NarrowPhaseKernel {
+private:
+    size_t m_numTrianglesToCheck{0};
+    size_t m_numActorsToCheck{0};
+    uint16_t* m_overlappingActors{nullptr};
+    TVMatch* m_triangleVertexMatch{nullptr};
+    sycl::float3* m_translation{nullptr};
+    uint16_t* m_numVertices{nullptr};
+    uint32_t* m_verticesOffset{nullptr};
+    sycl::float3* m_worldVertices{nullptr};
+    uint16_t* m_numTriangles{nullptr};
+    uint32_t* m_trianglesOffset{nullptr};
+    sycl::uint3* m_triangles{nullptr};
+    int* m_pairedActorIndices{nullptr};
+
+public:
+    constexpr explicit NarrowPhaseKernel(const NarrowPhaseState& npState, const ParallelState& state) noexcept
+    : m_numTrianglesToCheck{npState.numTrianglesToCheck},
+      m_numActorsToCheck{npState.numActorsToCheck},
+      m_overlappingActors{npState.overlappingActors.devicePointer},
+      m_triangleVertexMatch{npState.triangleVertexMatch.devicePointer},
+      m_translation{state.translation.devicePointer},
+      m_numVertices{state.numVertices.devicePointer},
+      m_verticesOffset{state.verticesOffset.devicePointer},
+      m_worldVertices{state.worldVertices.devicePointer},
+      m_numTriangles{state.numTriangles.devicePointer},
+      m_trianglesOffset{state.trianglesOffset.devicePointer},
+      m_triangles{state.triangles.devicePointer},
+      m_pairedActorIndices{state.pairedActorIndices.devicePointer}
+    {}
+
+    void operator()(sycl::nd_item<1> item) const {
+        const unsigned int id{static_cast<unsigned int>(item.get_global_linear_id())};
+        if (id < m_numTrianglesToCheck) {
+            unsigned int iTriangle{0};
+            unsigned int iActor{0};
+            unsigned int result_index{0};
+            unsigned int offset{0};
+            for (unsigned int iThisOverlap{0}; iThisOverlap<m_numActorsToCheck; ++iThisOverlap) {
+                const unsigned int iThisActor = m_overlappingActors[iThisOverlap];
+                const uint16_t numTrianglesThisActor = m_numTriangles[iThisActor];
+                const unsigned int iTriangleThisActor{id-offset};
+                if (iTriangleThisActor < numTrianglesThisActor) {
+                    iTriangle = m_trianglesOffset[iThisActor] + iTriangleThisActor;
+                    iActor = iThisActor;
+                    result_index = iThisOverlap*Constants::MaxNumTriangles + iTriangleThisActor;
+                }
+                offset += numTrianglesThisActor;
+            }
+            const unsigned int vertexOffset = m_verticesOffset[iActor];
+            const sycl::uint3& triangleIndices{m_triangles[iTriangle]};
+            std::array<sycl::float3,3> triangle{
+                m_worldVertices[vertexOffset+triangleIndices[0]],
+                m_worldVertices[vertexOffset+triangleIndices[1]],
+                m_worldVertices[vertexOffset+triangleIndices[2]]
+            };
+            const auto transformed = Util::triangleTransform(triangle);
+            const auto& rot = transformed[1];
+            const auto& negRot = transformed[2];
+
+            const unsigned int iOtherActor{static_cast<unsigned int>(m_pairedActorIndices[iActor])};
+            const unsigned int vertexOffsetOtherActor = m_verticesOffset[iOtherActor];
+            const unsigned int numVerticesOtherActor = m_numVertices[iOtherActor];
+
+            TVMatch result{};
+            unsigned int bestVertexIndex{std::numeric_limits<unsigned int>::max()};
+
+            for (unsigned int iVertex{0}; iVertex<numVerticesOtherActor; ++iVertex) {
+                sycl::float3 P{m_worldVertices[vertexOffsetOtherActor+iVertex]};
+                P -= triangle[0];
+                P = Util::mvmul(rot,P);
+
+                const auto [closestPoint, distanceSquared] = Util::closestPointOnTriangle(transformed[0], P);
+
+                if (distanceSquared < result.dsq) {
+                    result.dsq = distanceSquared;
+                    result.pointOnTriangle = closestPoint;
+                    bestVertexIndex = iVertex;
+                }
+            }
+            result.pointOnTriangle = Util::mvmul(negRot, result.pointOnTriangle) + triangle[0];
+            result.normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
+            float normalisation{sycl::length(result.normal)};
+            if (normalisation==0) {
+                // Degenerate triangle - make sure it doesn't make it down the computation
+                // It is not skipped earlier to avoid thread divergence
+                result.dsq = std::numeric_limits<float>::max();
+            } else {
+                result.normal /= normalisation;
+            }
+            sycl::float3 radius{result.pointOnTriangle - m_translation[iActor]};
+            float direction = (sycl::dot(result.normal, radius) < 0) ? -1.0f : 1.0f;
+            result.normal *= direction;
+
+            m_triangleVertexMatch[result_index] = result;
+        }
+    }
+};
+
+/// For each colliding actor, reduce all triangle-vertex pairs to the one with the smallest distance
+class TVReduceKernel {
+private:
+    struct TVMatchReduce {
+        TVMatch operator()(const TVMatch& a, const TVMatch& b) const {
+            return a.dsq<b.dsq ? a : b;
+        }
+    };
+
+    TVMatch* m_triangleVertexMatch{nullptr};
+    TVMatch* m_triangleBestMatch{nullptr};
+    sycl::local_accessor<std::byte, 1> m_scratch{};
+
+public:
+    constexpr static size_t TempMemorySize{Constants::MaxNumTriangles*sizeof(TVMatch)};
+
+    explicit TVReduceKernel(const NarrowPhaseState& npState, sycl::handler& cgh) noexcept
+    : m_triangleVertexMatch{npState.triangleVertexMatch.devicePointer},
+      m_triangleBestMatch{npState.triangleBestMatch.devicePointer},
+      m_scratch{TempMemorySize, cgh}
+    {}
+
+    void operator()(sycl::nd_item<1> item) const {
+        const auto groupId{item.get_group_linear_id()};
+        const auto localId{item.get_local_linear_id()};
+        TVMatch* start = m_triangleVertexMatch + groupId*Constants::MaxNumTriangles;
+        TVMatch* end = start + Constants::MaxNumTriangles;
+        sycl::ext::oneapi::experimental::group_with_scratchpad handle{
+            item.get_group(), sycl::span{&m_scratch[0], TempMemorySize}};
+        m_triangleBestMatch[groupId] =
+            sycl::ext::oneapi::experimental::joint_reduce(handle, start, end, TVMatchReduce{});
+    }
+};
+
+/// Apply the impulse force to colliding actors
+class ImpulseCollisionKernel {
+private:
+    size_t m_numActorsToCheck{0};
+    uint16_t* m_overlappingActors{nullptr};
+    TVMatch* m_triangleBestMatch{nullptr};
+    float* m_mass{nullptr};
+    sycl::float3* m_linearVelocity{nullptr};
+    float3x3* m_inertiaInv{nullptr};
+    sycl::float3* m_translation{nullptr};
+    sycl::float3* m_angularVelocity{nullptr};
+    int* m_pairedActorIndices{nullptr};
+    int* m_actorImpulseApplied{nullptr};
+
+public:
+    constexpr explicit ImpulseCollisionKernel(const NarrowPhaseState& npState, const ParallelState& state) noexcept
+    : m_numActorsToCheck{npState.numActorsToCheck},
+      m_overlappingActors{npState.overlappingActors.devicePointer},
+      m_triangleBestMatch{npState.triangleBestMatch.devicePointer},
+      m_mass{state.mass.devicePointer},
+      m_linearVelocity{state.linearVelocity.devicePointer},
+      m_inertiaInv{state.inertiaInv.devicePointer},
+      m_translation{state.translation.devicePointer},
+      m_angularVelocity{state.angularVelocity.devicePointer},
+      m_pairedActorIndices{state.pairedActorIndices.devicePointer},
+      m_actorImpulseApplied{state.actorImpulseApplied.devicePointer}
+    {}
+
+    void operator()(sycl::id<1> id) const {
+        uint16_t iActorA = m_overlappingActors[id];
+        uint16_t iActorB = m_pairedActorIndices[iActorA];
+        unsigned int idB{std::numeric_limits<unsigned int>::max()};
+        for (auto i{0}; i<m_numActorsToCheck; ++i) {
+            if (m_overlappingActors[i]==iActorB) {idB = i;}
+        }
+        const TVMatch& tvA = m_triangleBestMatch[id];
+        const TVMatch& tvB = m_triangleBestMatch[idB];
+        if (tvA.dsq < Constants::NarrowPhaseCollisionThreshold && tvA.dsq < tvB.dsq) {
+            const sycl::float3& point{tvA.pointOnTriangle};
+            const sycl::float3& normal{tvA.normal};
+            sycl::float3 ra = point - m_translation[iActorA];
+            sycl::float3 rb = point - m_translation[iActorB];
+            sycl::float3 vpa = m_linearVelocity[iActorA] + sycl::cross(m_angularVelocity[iActorA], ra);
+            sycl::float3 vpb = m_linearVelocity[iActorB] + sycl::cross(m_angularVelocity[iActorB], rb);
+            sycl::float3 vr = vpb - vpa;
+            sycl::float3 ta = Util::mvmul(m_inertiaInv[iActorA], sycl::cross(ra,normal));
+            sycl::float3 tb = Util::mvmul(m_inertiaInv[iActorB], sycl::cross(rb,normal));
+            float impulse =
+                (-1.0f - Constants::RestitutionCoefficient) *
+                sycl::dot(vr,normal) / (
+                    1.0f/m_mass[iActorA] +
+                    1.0f/m_mass[iActorB] +
+                    sycl::dot(
+                        sycl::cross(ta, ra) +
+                        sycl::cross(tb, rb)
+                        , normal
+                    )
+                );
+            sycl::float3 addLinVA = -1.0f * normal * impulse / m_mass[iActorA];
+            sycl::float3 addLinVB = normal * impulse / m_mass[iActorB];
+            sycl::float3 addAngVA = -1.0f * impulse * ta;
+            sycl::float3 addAngVB = impulse * tb;
+
+            auto canApplyImpulse = [this](uint16_t iActor){
+                sycl::atomic_ref<int, sycl::memory_order::acq_rel, sycl::memory_scope::device, sycl::access::address_space::global_space>
+                    lock{m_actorImpulseApplied[iActor]};
+                int alreadyApplied{0};
+                return lock.compare_exchange_strong(alreadyApplied, 1, sycl::memory_order::acq_rel);
+            };
+            if (canApplyImpulse(iActorA)) {
+                m_linearVelocity[iActorA] += addLinVA;
+                m_angularVelocity[iActorA] += addAngVA;
+            }
+            if (canApplyImpulse(iActorB)) {
+                m_linearVelocity[iActorB] += addLinVB;
+                m_angularVelocity[iActorB] += addAngVB;
+            }
+        }
+    }
+};
 
 // -----------------------------------------------------------------------------
 void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& state, sycl::queue& queue) {
-    using float3x3 = CollisionSim::ParallelState::float3x3;
 
     // Reset collision counter
     state.aabbOverlapsLastFrame = 0;
@@ -36,6 +570,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
     std::vector<sycl::event> d2hCopyTransformAndVelocity;
     std::vector<sycl::event> d2hCopyWallCollisionInfo;
     try {
+        // Copy data modified on host to the device
         std::vector<sycl::event> h2dCopyEvents{
             state.linearVelocity.copyToDevice(),
             state.angularVelocity.copyToDevice(),
@@ -43,222 +578,32 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             state.torque.copyToDevice()
         };
 
-        // Device pointers to be captured by lambda and copied to device
-        // - this is to avoid dereferencing on device the state host pointer
-        float* worldBoundaries = state.worldBoundaries.devicePointer;
-        float* mass = state.mass.devicePointer;
-        uint16_t* actorIndices = state.actorIndices.devicePointer;
-        sycl::float3* linearVelocity = state.linearVelocity.devicePointer;
-        float3x3* inertiaInv = state.inertiaInv.devicePointer;
-        sycl::float3* translation = state.translation.devicePointer;
-        sycl::float3* addLinearVelocity = state.addLinearVelocity.devicePointer;
-        sycl::float3* addAngularVelocity = state.addAngularVelocity.devicePointer;
-        Wall* wallCollisions = state.wallCollisions.devicePointer;
-        float3x3* bodyInertiaInv = state.bodyInertiaInv.devicePointer;
-        uint16_t* numVertices = state.numVertices.devicePointer;
-        uint32_t* verticesOffset = state.verticesOffset.devicePointer;
-        sycl::float3* bodyVertices = state.bodyVertices.devicePointer;
-        sycl::float3* worldVertices = state.worldVertices.devicePointer;
-        uint16_t* numTriangles = state.numTriangles.devicePointer;
-        uint32_t* trianglesOffset = state.trianglesOffset.devicePointer;
-        sycl::uint3* triangles = state.triangles.devicePointer;
-        sycl::float3* angularVelocity = state.angularVelocity.devicePointer;
-        float3x3* rotation = state.rotation.devicePointer;
-        sycl::float3* force = state.force.devicePointer;
-        sycl::float3* torque = state.torque.devicePointer;
-        std::array<sycl::float2*,3> aabb {
-            state.aabb[0].devicePointer,
-            state.aabb[1].devicePointer,
-            state.aabb[2].devicePointer
-        };
-        std::array<Edge*,3> sortedAABBEdges {
-            state.sortedAABBEdges[0].devicePointer,
-            state.sortedAABBEdges[1].devicePointer,
-            state.sortedAABBEdges[2].devicePointer
-        };
-        bool* aabbOverlaps = state.aabbOverlaps.devicePointer;
-        int* pairedActorIndices = state.pairedActorIndices.devicePointer;
-        int* actorImpulseApplied = state.actorImpulseApplied.devicePointer;
-
-        sycl::event actorKernelEvent = queue.submit([&](sycl::handler& cgh){
+        // Launch 4 kernels to execute motion of actors and their axis-aligned bounding boxes
+        sycl::event actorKernelEvent = queue.submit([&h2dCopyEvents, &dtime, &state](sycl::handler& cgh){
             cgh.depends_on(h2dCopyEvents);
-            cgh.parallel_for<class actor_kernel>(Constants::NumActors, [=](sycl::id<1> id){
-                // Compute linear and angular momentum
-                auto linearMomentum = mass[id] * linearVelocity[id];
-                auto angularMomentum = Util::mvmul(Util::inverse(inertiaInv[id]), angularVelocity[id]);
-
-                linearMomentum += force[id] * dtime;
-                angularMomentum += torque[id] * dtime;
-
-                // Compute linear and angular velocity
-                linearVelocity[id] = linearMomentum / mass[id];
-                inertiaInv[id] = Util::mmul(
-                    Util::mmul(rotation[id], bodyInertiaInv[id]),
-                    Util::transpose(rotation[id])); // R * Ib^-1 * R^T
-                angularVelocity[id] = Util::mvmul(inertiaInv[id], angularMomentum);
-
-                // Apply translation
-                translation[id] += linearVelocity[id] * dtime;
-
-                // Protect actors from escaping the world
-                #pragma unroll
-                for (unsigned int axis{0}; axis<3; ++axis) {
-                    translation[id][0] = sycl::max(translation[id][0], worldBoundaries[0]);
-                    translation[id][0] = sycl::min(translation[id][0], worldBoundaries[1]);
-                    translation[id][1] = sycl::max(translation[id][1], worldBoundaries[2]);
-                    translation[id][1] = sycl::min(translation[id][1], worldBoundaries[3]);
-                    translation[id][2] = sycl::max(translation[id][2], worldBoundaries[4]);
-                    translation[id][2] = sycl::min(translation[id][2], worldBoundaries[5]);
-                }
-
-                // Apply rotation
-                auto star = [](const sycl::float3& v) constexpr {
-                    return std::array<sycl::float3,3>{
-                        sycl::float3{ 0.0f,  v[2], -v[1]},
-                        sycl::float3{-v[2],  0.0f,  v[0]},
-                        sycl::float3{ v[1], -v[0],  0.0f}
-                    };
-                };
-                std::array<sycl::float3,3> drot = Util::msmul(
-                    Util::mmul(star(angularVelocity[id]), rotation[id]),
-                    dtime);
-                rotation[id][0] += drot[0];
-                rotation[id][1] += drot[1];
-                rotation[id][2] += drot[2];
-
-                // Reset AABB pairing info and impulse lock
-                pairedActorIndices[id] = -1;
-                actorImpulseApplied[id] = 0;
-            });
+            cgh.parallel_for(Constants::NumActors, ActorKernel{dtime,state});
         });
 
-        // Update vertex positions and calculate world collisions
-        sycl::event vertexKernelEvent = queue.submit([&](sycl::handler& cgh){
+        sycl::event vertexKernelEvent = queue.submit([&actorKernelEvent, &state](sycl::handler& cgh){
             cgh.depends_on(actorKernelEvent);
-            cgh.parallel_for<class vertex_kernel>(state.numAllVertices, [=](sycl::id<1> id){
-                uint16_t iActor = actorIndices[id];
-
-                worldVertices[id] = sycl::float3{
-                    // x
-                    rotation[iActor][0][0]*bodyVertices[id][0] +
-                    rotation[iActor][1][0]*bodyVertices[id][1] +
-                    rotation[iActor][2][0]*bodyVertices[id][2] +
-                    translation[iActor][0],
-                    // y
-                    rotation[iActor][0][1]*bodyVertices[id][0] +
-                    rotation[iActor][1][1]*bodyVertices[id][1] +
-                    rotation[iActor][2][1]*bodyVertices[id][2] +
-                    translation[iActor][1],
-                    // z
-                    rotation[iActor][0][2]*bodyVertices[id][0] +
-                    rotation[iActor][1][2]*bodyVertices[id][1] +
-                    rotation[iActor][2][2]*bodyVertices[id][2] +
-                    translation[iActor][2]
-                };
-
-                Wall collision{Wall::None};
-                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][0] <= worldBoundaries[0]) << 0);
-                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][0] >= worldBoundaries[1]) << 1);
-                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][1] <= worldBoundaries[2]) << 2);
-                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][1] >= worldBoundaries[3]) << 3);
-                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][2] <= worldBoundaries[4]) << 4);
-                collision |= (static_cast<WallUnderlyingType>(worldVertices[id][2] >= worldBoundaries[5]) << 5);
-
-                sycl::float3 normal = wallNormal(collision);
-                sycl::float3 radius{worldVertices[id] - translation[iActor]};
-                sycl::float3 a{sycl::cross(radius, normal)};
-                sycl::float3 b{Util::mvmul(inertiaInv[iActor], a)};
-                sycl::float3 c{sycl::cross(b, radius)};
-                float d{sycl::dot(c, normal)};
-                float impulse = (-1.0f - Constants::RestitutionCoefficient) *
-                                sycl::dot(linearVelocity[iActor], normal) /
-                                (1.0f/mass[iActor] + d);
-
-                addLinearVelocity[id] = (impulse / mass[iActor]) * normal;
-                addAngularVelocity[id] = impulse * b;
-                bool ignoreAwayFromWall{sycl::dot(linearVelocity[iActor], normal) > 0.0f};
-                wallCollisions[id] = static_cast<Wall>(
-                    static_cast<WallUnderlyingType>(collision) *
-                    static_cast<WallUnderlyingType>(!ignoreAwayFromWall));
-            });
+            cgh.parallel_for(state.numAllVertices, VertexKernel{state});
         });
 
-        // Calculate the axis-align bounding boxes for each actor
-        // The use of sycl::joint_reduce requires 1D arrays of vx, vy, vz
-        // so we copy the AoS global memory vertices into local memory SoA
-        sycl::event aabbKernelEvent = queue.submit([&](sycl::handler& cgh){
+        sycl::event aabbKernelEvent = queue.submit([&vertexKernelEvent, &state](sycl::handler& cgh){
             cgh.depends_on(vertexKernelEvent);
-            constexpr static size_t aabbWorkGroupSize{32};
-            const sycl::nd_range<1> aabbRange{Constants::NumActors*aabbWorkGroupSize,aabbWorkGroupSize};
-            std::array localVertices{
-                sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
-                sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
-                sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh}};
-            cgh.parallel_for<class aabb_kernel>(aabbRange, [=](sycl::nd_item<1> it){
-                size_t iActor = it.get_group_linear_id();
-
-                sycl::float3* actorVertices = worldVertices + verticesOffset[iActor];
-                size_t numVerticesPerThread{1 + numVertices[iActor]/aabbWorkGroupSize};
-                for (size_t i{0}; i<numVerticesPerThread; ++i) {
-                    size_t iVertex{it.get_local_linear_id() * numVerticesPerThread + i};
-                    if (iVertex<numVertices[iActor]) {
-                        localVertices[0][iVertex] = actorVertices[iVertex][0];
-                        localVertices[1][iVertex] = actorVertices[iVertex][1];
-                        localVertices[2][iVertex] = actorVertices[iVertex][2];
-                    }
-                }
-
-                sycl::group_barrier(it.get_group());
-
-                #pragma unroll
-                for (unsigned int axis{0}; axis<3; ++axis) {
-                    aabb[axis][iActor] = sycl::float2{
-                        sycl::joint_reduce(
-                            it.get_group(),
-                            localVertices[axis].begin(),
-                            localVertices[axis].begin()+numVertices[iActor],
-                            sycl::minimum{}),
-                        sycl::joint_reduce(
-                            it.get_group(),
-                            localVertices[axis].begin(),
-                            localVertices[axis].begin()+numVertices[iActor],
-                            sycl::maximum{})
-                    };
-                }
-            });
+            const sycl::nd_range<1> aabbRange{Constants::NumActors*AABBKernel::workGroupSize,AABBKernel::workGroupSize};
+            cgh.parallel_for(aabbRange, AABBKernel{cgh,state});
         });
 
-        // Sort the AABB edges using odd-even merge-sort
-        // Given the small size of the problem we can avoid submitting N(=2*NumActors) kernels.
-        // Instead, we can submit one kernel with a single work-group per axis and exploit a work-group barrier.
-        // This requires that N is smaller than the maximum work-group size of the GPU we're using.
-        sycl::event aabbSortKernelEvent = queue.submit([&](sycl::handler& cgh){
+        sycl::event aabbSortKernelEvent = queue.submit([&aabbKernelEvent, &state](sycl::handler& cgh){
             cgh.depends_on(aabbKernelEvent);
-            cgh.parallel_for<class aabb_sort_kernel>(sycl::nd_range<1>{3*Constants::NumActors, Constants::NumActors}, [=](sycl::nd_item<1> item){
-                size_t axis = item.get_group_linear_id();
-                size_t id = item.get_local_linear_id();
-                auto edgeValue = [&aabb, &axis](Edge e) constexpr -> float {
-                    return e.isEnd ? aabb[axis][e.actorIndex][1] : aabb[axis][e.actorIndex][0];
-                };
-                auto edgeGreater = [&edgeValue](Edge edgeA, Edge edgeB) constexpr -> bool {
-                    return edgeValue(edgeA) > edgeValue(edgeB);
-                };
-                auto compareExchange = [&edgeGreater](Edge& edgeA, Edge& edgeB) constexpr -> void {
-                    if (edgeGreater(edgeA,edgeB)) {std::swap(edgeA, edgeB);}
-                };
-                for (size_t step{0}; step < 2*Constants::NumActors; ++step) {
-                    size_t i = id * 2 + step%2;
-                    if ((i+1) < (2*Constants::NumActors)) {
-                        compareExchange(sortedAABBEdges[axis][i], sortedAABBEdges[axis][i+1]);
-                    }
-                    sycl::group_barrier(item.get_group());
-                }
-            });
+            const sycl::nd_range<1> aabbSortRange{3*Constants::NumActors, Constants::NumActors};
+            cgh.parallel_for(aabbSortRange, AABBSortKernel{state});
         });
 
         // Start copying wall collision info to the host now, such that the memcpy
-        // API calls happen in the shadow of aabb_sort_kernel still running, and the
-        // async copy may continue while aabb_overlap_kernel runs
+        // API calls happen in the shadow of AABBSortKernel still running, and the
+        // async copy may continue while AABBOverlapKernel runs
         d2hCopyWallCollisionInfo.insert(d2hCopyWallCollisionInfo.end(),{
             state.wallCollisions.copyToHost(vertexKernelEvent),
             state.addLinearVelocity.copyToHost(vertexKernelEvent),
@@ -266,46 +611,14 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         });
 
         // Find overlapping AABB pairs
-        sycl::event aabbOverlapKernelEvent = queue.submit([&](sycl::handler& cgh){
+        sycl::event aabbOverlapKernelEvent = queue.submit([&aabbSortKernelEvent, &state](sycl::handler& cgh){
             cgh.depends_on(aabbSortKernelEvent);
-            cgh.parallel_for<class aabb_overlap_kernel>(Constants::NumActorPairs, [=](sycl::id<1> id){
-                size_t iActorA{Constants::ActorPairs[id].first};
-                size_t iActorB{Constants::ActorPairs[id].second};
-                sycl::int3 posStartA{-1};
-                sycl::int3 posStartB{-1};
-                sycl::int3 posEndA{-1};
-                sycl::int3 posEndB{-1};
-                for (int iEdge{0}; iEdge<static_cast<int>(2*Constants::NumActors); ++iEdge) {
-                    #pragma unroll
-                    for (int axis{0}; axis<3; ++axis) {
-                        const Edge& edge{sortedAABBEdges[axis][iEdge]};
-                        if (edge.actorIndex==iActorA) {
-                            if (edge.isEnd) {posEndA[axis] = iEdge;}
-                            else {posStartA[axis] = iEdge;}
-                        } else if (edge.actorIndex==iActorB) {
-                            if (edge.isEnd) {posEndB[axis] = iEdge;}
-                            else {posStartB[axis] = iEdge;}
-                        }
-                    }
-                }
-                auto overlap = [](int a1, int a2, int b1, int b2) constexpr -> bool {
-                    return (a1 < b1 && b1 < a2) || (b1 < a1 && a1 < b2);
-                };
-                aabbOverlaps[id] = (
-                    overlap(posStartA[0], posEndA[0], posStartB[0], posEndB[0]) &&
-                    overlap(posStartA[1], posEndA[1], posStartB[1], posEndB[1]) &&
-                    overlap(posStartA[2], posEndA[2], posStartB[2], posEndB[2])
-                );
-                if (aabbOverlaps[id]) {
-                    pairedActorIndices[iActorA] = static_cast<int>(iActorB);
-                    pairedActorIndices[iActorB] = static_cast<int>(iActorA);
-                }
-            });
+            cgh.parallel_for(Constants::NumActorPairs, AABBOverlapKernel{state});
         });
 
         // Start copying transform info to the host now, such that the memcpy
         // API calls and the copy itself happen in the shadow of the
-        // aabb_overlap_kernel still running
+        // AABBOverlapKernel still running
         d2hCopyTransformAndVelocity.insert(d2hCopyTransformAndVelocity.end(), {
             state.translation.copyToHost(actorKernelEvent),
             state.rotation.copyToHost(actorKernelEvent),
@@ -331,180 +644,38 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         }
         std::optional<sycl::event> impulseCollisionKernelEvent;
         if (!overlappingActors.empty()) {
-            USMData<uint16_t> usmOverlappingActors{queue, overlappingActors.size()};
-            usmOverlappingActors.hostContainer.assign(overlappingActors.begin(), overlappingActors.end());
-            sycl::event copyOverlappingActorsEvent = usmOverlappingActors.copyToDevice();
-            uint16_t* dptrOverlappingActors = usmOverlappingActors.devicePointer;
+            // Allocate the narrow-phase state data and copy the overlapping actors information to device
+            NarrowPhaseState npState{numTrianglesToCheck, overlappingActors, queue};
+            sycl::event copyOverlappingActorsEvent = npState.overlappingActors.copyToDevice();
 
-            // Allocate USM container for the output of the triangle-vertex matching
-            // {float3 point on triangle, float3 normal, float distance squared}
-            struct TVMatch {
-                sycl::float3 pointOnTriangle{0.0f};
-                sycl::float3 normal{0.0f};
-                float dsq{std::numeric_limits<float>::max()};
-            };
-            USMData<TVMatch> usmTriangleVertexMatch{queue, numActorsToCheck*Constants::MaxNumTriangles};
-            TVMatch* dptrTriangleVertexMatch = usmTriangleVertexMatch.devicePointer;
             // Reset the triangle-vertex match data on the device
-            sycl::event resetTriangleVertexMatchEvent = queue.submit([&](sycl::handler& cgh){
-                cgh.parallel_for<class tv_reset_kernel>(usmTriangleVertexMatch.size(), [=](sycl::id<1> id){
+            sycl::event resetTriangleVertexMatchEvent = queue.submit([&npState](sycl::handler& cgh){
+                TVMatch* dptrTriangleVertexMatch = npState.triangleVertexMatch.devicePointer;
+                cgh.parallel_for<class TVResetKernel>(npState.triangleVertexMatch.size(), [dptrTriangleVertexMatch](sycl::id<1> id){
                     dptrTriangleVertexMatch[id] = TVMatch{};
                 });
             });
 
-            const sycl::nd_range<1> narrowPhaseRange{Util::ndRangeAllCU(numTrianglesToCheck,queue)};
-            sycl::event narrowPhaseKernelEvent = queue.submit([&](sycl::handler& cgh){
+            // Submit the triangle-vertex matching kernel
+            const sycl::nd_range<1> narrowPhaseRange{Util::ndRangeAllCU(npState.numTrianglesToCheck,queue)};
+            sycl::event narrowPhaseKernelEvent = queue.submit([&copyOverlappingActorsEvent, &resetTriangleVertexMatchEvent, &narrowPhaseRange, &npState, &state](sycl::handler& cgh){
                 cgh.depends_on({copyOverlappingActorsEvent,resetTriangleVertexMatchEvent});
-                cgh.parallel_for<class narrow_phase_kernel>(narrowPhaseRange, [=](sycl::nd_item<1> item){
-                    const unsigned int id{static_cast<unsigned int>(item.get_global_linear_id())};
-                    if (id < numTrianglesToCheck) {
-                        unsigned int iTriangle{0};
-                        unsigned int iActor{0};
-                        unsigned int result_index{0};
-                        unsigned int offset{0};
-                        for (unsigned int iThisOverlap{0}; iThisOverlap<numActorsToCheck; ++iThisOverlap) {
-                            const unsigned int iThisActor = dptrOverlappingActors[iThisOverlap];
-                            const uint16_t numTrianglesThisActor = numTriangles[iThisActor];
-                            const unsigned int iTriangleThisActor{id-offset};
-                            if (iTriangleThisActor < numTrianglesThisActor) {
-                                iTriangle = trianglesOffset[iThisActor] + iTriangleThisActor;
-                                iActor = iThisActor;
-                                result_index = iThisOverlap*Constants::MaxNumTriangles + iTriangleThisActor;
-                            }
-                            offset += numTrianglesThisActor;
-                        }
-                        const unsigned int vertexOffset = verticesOffset[iActor];
-                        const sycl::uint3& triangleIndices{triangles[iTriangle]};
-                        std::array<sycl::float3,3> triangle{
-                            worldVertices[vertexOffset+triangleIndices[0]],
-                            worldVertices[vertexOffset+triangleIndices[1]],
-                            worldVertices[vertexOffset+triangleIndices[2]]
-                        };
-                        const auto transformed = Util::triangleTransform(triangle);
-                        const auto& rot = transformed[1];
-                        const auto& negRot = transformed[2];
-
-                        const unsigned int iOtherActor{static_cast<unsigned int>(pairedActorIndices[iActor])};
-                        const unsigned int vertexOffsetOtherActor = verticesOffset[iOtherActor];
-                        const unsigned int numVerticesOtherActor = numVertices[iOtherActor];
-
-                        TVMatch result{};
-                        unsigned int bestVertexIndex{std::numeric_limits<unsigned int>::max()};
-
-                        for (unsigned int iVertex{0}; iVertex<numVerticesOtherActor; ++iVertex) {
-                            sycl::float3 P{worldVertices[vertexOffsetOtherActor+iVertex]};
-                            P -= triangle[0];
-                            P = Util::mvmul(rot,P);
-
-                            const auto [closestPoint, distanceSquared] = Util::closestPointOnTriangle(transformed[0], P);
-
-                            if (distanceSquared < result.dsq) {
-                                result.dsq = distanceSquared;
-                                result.pointOnTriangle = closestPoint;
-                                bestVertexIndex = iVertex;
-                            }
-                        }
-                        result.pointOnTriangle = Util::mvmul(negRot, result.pointOnTriangle) + triangle[0];
-                        result.normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
-                        float normalisation{sycl::length(result.normal)};
-                        if (normalisation==0) {
-                            // Degenerate triangle - make sure it doesn't make it down the computation
-                            // It is not skipped earlier to avoid thread divergence
-                            result.dsq = std::numeric_limits<float>::max();
-                        } else {
-                            result.normal /= normalisation;
-                        }
-                        sycl::float3 radius{result.pointOnTriangle - translation[iActor]};
-                        float direction = (sycl::dot(result.normal, radius) < 0) ? -1.0f : 1.0f;
-                        result.normal *= direction;
-
-                        dptrTriangleVertexMatch[result_index] = result;
-                    }
-                });
+                cgh.parallel_for(narrowPhaseRange, NarrowPhaseKernel{npState, state});
             });
 
-            // Allocate USM container for the output of the closest-distance triangle-vertex matching
-            USMData<TVMatch> usmTriangleBestMatch{queue, numActorsToCheck};
-            TVMatch* dptrTriangleBestMatch = usmTriangleBestMatch.devicePointer;
-            const sycl::nd_range<1> reduceRange{numActorsToCheck*Constants::MaxNumTriangles, Constants::MaxNumTriangles};
-
-            struct MyReduce {
-                TVMatch operator()(const TVMatch& a, const TVMatch& b) const {
-                    return a.dsq<b.dsq ? a : b;
-                }
-            };
+            TVMatch* dptrTriangleBestMatch = npState.triangleBestMatch.devicePointer;
 
             // For each actor out of numActorsToCheck, reduce all triangle-vertex pairs to the one with the smallest distance
-            sycl::event triangleVertexReduceKernelEvent = queue.submit([&](sycl::handler& cgh){
+            sycl::event triangleVertexReduceKernelEvent = queue.submit([&narrowPhaseKernelEvent, &npState](sycl::handler& cgh){
                 cgh.depends_on(narrowPhaseKernelEvent);
-                size_t temp_memory_size = Constants::MaxNumTriangles*sizeof(TVMatch);
-                sycl::local_accessor<std::byte, 1> scratch{temp_memory_size, cgh};
-                cgh.parallel_for<class tv_reduce_kernel>(reduceRange, [=](sycl::nd_item<1> item){
-                    const auto groupId{item.get_group_linear_id()};
-                    const auto localId{item.get_local_linear_id()};
-                    TVMatch* start = dptrTriangleVertexMatch + groupId*Constants::MaxNumTriangles;
-                    TVMatch* end = start + Constants::MaxNumTriangles;
-                    sycl::ext::oneapi::experimental::group_with_scratchpad handle{
-                        item.get_group(), sycl::span{&scratch[0], temp_memory_size}};
-                    dptrTriangleBestMatch[groupId] =
-                        sycl::ext::oneapi::experimental::joint_reduce(handle, start, end, MyReduce{});
-                });
+                const sycl::nd_range<1> reduceRange{npState.numActorsToCheck*Constants::MaxNumTriangles, Constants::MaxNumTriangles};
+                cgh.parallel_for(reduceRange, TVReduceKernel{npState, cgh});
             });
 
             // Submit the impulse collision kernel
-            impulseCollisionKernelEvent = queue.submit([&](sycl::handler& cgh){
+            impulseCollisionKernelEvent = queue.submit([&triangleVertexReduceKernelEvent, &npState, &state](sycl::handler& cgh){
                 cgh.depends_on(triangleVertexReduceKernelEvent);
-                cgh.parallel_for<class impulse_collision_kernel>(numActorsToCheck, [=](sycl::id<1> id){
-                    uint16_t iActorA = dptrOverlappingActors[id];
-                    uint16_t iActorB = pairedActorIndices[iActorA];
-                    unsigned int idB{std::numeric_limits<unsigned int>::max()};
-                    for (auto i{0}; i<numActorsToCheck; ++i) {
-                        if (dptrOverlappingActors[i]==iActorB) {idB = i;}
-                    }
-                    const TVMatch& tvA = dptrTriangleBestMatch[id];
-                    const TVMatch& tvB = dptrTriangleBestMatch[idB];
-                    if (tvA.dsq < Constants::NarrowPhaseCollisionThreshold && tvA.dsq < tvB.dsq) {
-                        const sycl::float3& point{tvA.pointOnTriangle};
-                        const sycl::float3& normal{tvA.normal};
-                        sycl::float3 ra = point - translation[iActorA];
-                        sycl::float3 rb = point - translation[iActorB];
-                        sycl::float3 vpa = linearVelocity[iActorA] + sycl::cross(angularVelocity[iActorA], ra);
-                        sycl::float3 vpb = linearVelocity[iActorB] + sycl::cross(angularVelocity[iActorB], rb);
-                        sycl::float3 vr = vpb - vpa;
-                        sycl::float3 ta = Util::mvmul(inertiaInv[iActorA], sycl::cross(ra,normal));
-                        sycl::float3 tb = Util::mvmul(inertiaInv[iActorB], sycl::cross(rb,normal));
-                        float impulse =
-                            (-1.0f - Constants::RestitutionCoefficient) *
-                            sycl::dot(vr,normal) / (
-                                1.0f/mass[iActorA] +
-                                1.0f/mass[iActorB] +
-                                sycl::dot(
-                                    sycl::cross(ta, ra) +
-                                    sycl::cross(tb, rb)
-                                    , normal
-                                )
-                            );
-                        sycl::float3 addLinVA = -1.0f * normal * impulse / mass[iActorA];
-                        sycl::float3 addLinVB = normal * impulse / mass[iActorB];
-                        sycl::float3 addAngVA = -1.0f * impulse * ta;
-                        sycl::float3 addAngVB = impulse * tb;
-
-                        auto canApplyImpulse = [&actorImpulseApplied](uint16_t iActor){
-                            sycl::atomic_ref<int, sycl::memory_order::acq_rel, sycl::memory_scope::device, sycl::access::address_space::global_space>
-                                lock{actorImpulseApplied[iActor]};
-                            int alreadyApplied{0};
-                            return lock.compare_exchange_strong(alreadyApplied, 1, sycl::memory_order::acq_rel);
-                        };
-                        if (canApplyImpulse(iActorA)) {
-                            linearVelocity[iActorA] += addLinVA;
-                            angularVelocity[iActorA] += addAngVA;
-                        }
-                        if (canApplyImpulse(iActorB)) {
-                            linearVelocity[iActorB] += addLinVB;
-                            angularVelocity[iActorB] += addAngVB;
-                        }
-                    }
-                });
+                cgh.parallel_for(npState.numActorsToCheck, ImpulseCollisionKernel{npState, state});
             });
         }
 

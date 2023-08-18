@@ -16,6 +16,7 @@
 #include <sycl/sycl.hpp>
 #include <vector>
 #include <array>
+#include <unordered_set>
 
 namespace CollisionSim {
 
@@ -94,6 +95,34 @@ class ParallelState {
         USMData<int,Constants::NumActors> actorImpulseApplied; /// Lock to avoid concurrent collisions
         size_t aabbOverlapsLastFrame{0};
         ///@}
+};
+
+
+/**
+ * Structure holding the result of triangle-vertex matching
+ *
+ * {float3 point on triangle, float3 normal, float distance squared}
+ */
+struct TVMatch {
+    sycl::float3 pointOnTriangle{0.0f};
+    sycl::float3 normal{0.0f};
+    float dsq{std::numeric_limits<float>::max()};
+};
+
+/**
+ * Class representing the narrow phase state with dynamic data size
+ * depending on the output of the broad phase collision detection
+ */
+class NarrowPhaseState {
+    public:
+        explicit NarrowPhaseState(size_t nTrianglesToCheck,
+                                  const std::unordered_set<uint16_t>& overlappingActorSet,
+                                  const sycl::queue& queue);
+        size_t numTrianglesToCheck{0};
+        size_t numActorsToCheck{0};
+        USMData<uint16_t> overlappingActors;
+        USMData<TVMatch> triangleVertexMatch;
+        USMData<TVMatch> triangleBestMatch;
 };
 
 } // namespace CollisionSim

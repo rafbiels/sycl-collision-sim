@@ -124,3 +124,15 @@ void CollisionSim::ParallelState::copyAllToDeviceAsync() const {
     sortedAABBEdges[1].copyToDevice();
     sortedAABBEdges[2].copyToDevice();
 }
+
+// -----------------------------------------------------------------------------
+CollisionSim::NarrowPhaseState::NarrowPhaseState(size_t nTrianglesToCheck,
+                                                 const std::unordered_set<uint16_t>& overlappingActorSet,
+                                                 const sycl::queue& queue)
+: numTrianglesToCheck{nTrianglesToCheck},
+  numActorsToCheck{overlappingActorSet.size()},
+  overlappingActors{queue, numActorsToCheck},
+  triangleVertexMatch{queue, numActorsToCheck*Constants::MaxNumTriangles},
+  triangleBestMatch{queue, numActorsToCheck} {
+    overlappingActors.hostContainer.assign(overlappingActorSet.begin(), overlappingActorSet.end());
+  }
