@@ -9,7 +9,8 @@
 
 #include "TextRenderer.h"
 #include "Util.h"
-#include "State.h"
+#include "ParallelState.h"
+#include "SequentialState.h"
 #include "World.h"
 
 #if HEADLESS

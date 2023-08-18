@@ -108,19 +108,24 @@ target_compile_options(Util PUBLIC ${SYCL_FLAGS})
 target_link_libraries(Util
     PUBLIC Magnum::Magnum)
 
-add_library(State OBJECT src/State.cpp)
-target_compile_options(State PUBLIC ${SYCL_FLAGS})
-target_link_libraries(State
-    PUBLIC Util Magnum::Magnum
-    PRIVATE Actor)
+add_library(ParallelState OBJECT src/ParallelState.cpp)
+target_compile_options(ParallelState PUBLIC ${SYCL_FLAGS})
+target_link_libraries(ParallelState
+    PUBLIC Magnum::Magnum
+    PRIVATE Util Actor)
 
-add_library(Simulation OBJECT src/Simulation.cpp)
-target_compile_options(Simulation PUBLIC ${SYCL_FLAGS})
-target_link_libraries(Simulation
-    PRIVATE Util Actor
-    PUBLIC State)
+add_library(ParallelSimulation OBJECT src/ParallelSimulation.cpp)
+target_compile_options(ParallelSimulation PUBLIC ${SYCL_FLAGS})
+target_link_libraries(ParallelSimulation
+    PRIVATE Util Actor Magnum::Magnum
+    PUBLIC ParallelState)
 
 # Targets without SYCL dependency
+add_library(SequentialSimulation OBJECT src/SequentialSimulation.cpp)
+target_link_libraries(SequentialSimulation
+    PRIVATE Util Actor
+    PUBLIC Magnum::Magnum)
+
 add_library(Shape OBJECT src/Shape.cpp)
 target_link_libraries(Shape
     PUBLIC Magnum::Magnum Magnum::GL)
@@ -146,7 +151,7 @@ add_executable(collision-sim src/Application.cpp
 
 target_link_libraries(collision-sim
     PRIVATE
-    Actor Shape Simulation State TextRenderer Util World
+    Actor ParallelSimulation ParallelState SequentialSimulation Shape TextRenderer Util World
     ${MagnumApplicationLibrary}
     Magnum::GL Magnum::Magnum Magnum::Shaders)
 

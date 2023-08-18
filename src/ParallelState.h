@@ -4,37 +4,22 @@
  * For a copy, see https://opensource.org/licenses/MIT.
  */
 
-#ifndef COLLISION_SIM_STATE
-#define COLLISION_SIM_STATE
+#ifndef COLLISION_SIM_PARALLELSTATE
+#define COLLISION_SIM_PARALLELSTATE
 
 #include "Constants.h"
+#include "Edge.h"
 #include "USMData.h"
-#include "Util.h"
 #include "Wall.h"
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Range.h>
 #include <sycl/sycl.hpp>
 #include <vector>
 #include <array>
-#include <utility>
 
 namespace CollisionSim {
 
 class Actor;
-
-struct Edge {
-    uint16_t actorIndex{std::numeric_limits<uint16_t>::max()};
-    bool isEnd{false};
-};
-
-template <size_t... Indices>
-consteval std::array<Edge, 2*sizeof...(Indices)> edgeArray(std::index_sequence<Indices...>) {
-    return {{(Edge{Indices, false})..., (Edge{Indices, true})...}};
-}
-
-inline Corrade::Utility::Debug& operator<<(Corrade::Utility::Debug& s, Edge e) {
-    return s << std::to_string(e.actorIndex).append(1, e.isEnd ? 'e' : 's').c_str();
-}
 
 /**
  * Class representing the simulation state for parallel simulation,
@@ -111,35 +96,6 @@ class ParallelState {
         ///@}
 };
 
-/**
- * Class holding static data for sequential simulation
- */
-class SequentialState {
-    public:
-        SequentialState() = delete;
-        explicit SequentialState(const Magnum::Range3D& worldBounds);
-
-        /// Copy and assignment explicitly deleted
-        ///@{
-        SequentialState(const SequentialState&) = delete;
-        SequentialState(SequentialState&&) = delete;
-        SequentialState& operator=(const SequentialState&) = delete;
-        SequentialState& operator=(SequentialState&&) = delete;
-        ///}
-
-        /// State variables
-        ///@{
-        Magnum::Range3D worldBoundaries;
-        std::array<std::array<Edge, 2*Constants::NumActors>,3> sortedAABBEdges{
-            edgeArray(std::make_index_sequence<Constants::NumActors>{}), // x
-            edgeArray(std::make_index_sequence<Constants::NumActors>{}), // y
-            edgeArray(std::make_index_sequence<Constants::NumActors>{}), // z
-        };
-        Util::OverlapSet aabbOverlaps;
-        size_t aabbOverlapsLastFrame{0};
-        ///}
-};
-
 } // namespace CollisionSim
 
-#endif // COLLISION_SIM_STATE
+#endif // COLLISION_SIM_PARALLELSTATE

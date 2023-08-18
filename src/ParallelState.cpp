@@ -4,8 +4,9 @@
  * For a copy, see https://opensource.org/licenses/MIT.
  */
 
-#include "State.h"
+#include "ParallelState.h"
 #include "Actor.h"
+#include "Util.h"
 #include <algorithm>
 
 // -----------------------------------------------------------------------------
@@ -123,7 +124,3 @@ void CollisionSim::ParallelState::copyAllToDeviceAsync() const {
     sortedAABBEdges[1].copyToDevice();
     sortedAABBEdges[2].copyToDevice();
 }
-
-// -----------------------------------------------------------------------------
-CollisionSim::SequentialState::SequentialState(const Magnum::Range3D& worldBounds)
-: worldBoundaries(worldBounds) {}

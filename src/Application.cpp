@@ -6,7 +6,8 @@
 
 #include "Application.h"
 #include "Actor.h"
-#include "Simulation.h"
+#include "ParallelSimulation.h"
+#include "SequentialSimulation.h"
 #include "Constants.h"
 
 #include <Magnum/Magnum.h>

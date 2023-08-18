@@ -89,13 +89,6 @@ class MovingAverage {
         size_t m_window{0};
 };
 
-struct ActorIndexPairHash {
-    size_t operator()(std::pair<uint16_t,uint16_t> p) const {
-        return (static_cast<size_t>(p.first) << 16) | static_cast<size_t>(p.second);
-    }
-};
-class OverlapSet : public std::unordered_set<std::pair<uint16_t,uint16_t>,ActorIndexPairHash> {};
-
 
 Magnum::Matrix3 outerProduct(const Magnum::Vector3& a, const Magnum::Vector3& b);
 
