@@ -108,6 +108,10 @@ constexpr sycl::vec<T,3> toSycl(const Magnum::Math::Vector<3,T>& vec) {
     const T (&data)[3] = vec.data();
     return {data[0],data[1],data[2]};
 }
+template<typename T>
+constexpr sycl::vec<T,3> toSycl(const std::array<T,3>& vec) {
+    return {vec[0],vec[1],vec[2]};
+}
 constexpr std::array<sycl::float3,3> toSycl(const Magnum::Matrix3& mat) {
     const float (&data)[9] = mat.data();
     return {sycl::float3{data[0],data[1],data[2]},
@@ -128,6 +132,10 @@ constexpr Magnum::Matrix3 toMagnum(const std::array<sycl::float3,3>& mat) {
         Magnum::Vector3{mat[1][0], mat[1][1], mat[1][2]},
         Magnum::Vector3{mat[2][0], mat[2][1], mat[2][2]},
     };
+}
+template<typename T>
+constexpr std::array<T,3> toArray(const sycl::vec<T,3>& vec) {
+    return {vec[0],vec[1],vec[2]};
 }
 constexpr Magnum::Matrix4 transformationMatrix(const sycl::float3& translation,
                                                const std::array<sycl::float3,3>& rotation) {

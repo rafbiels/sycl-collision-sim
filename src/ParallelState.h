@@ -104,8 +104,8 @@ class ParallelState {
  * {float3 point on triangle, float3 normal, float distance squared}
  */
 struct TVMatch {
-    sycl::float3 pointOnTriangle{0.0f};
-    sycl::float3 normal{0.0f};
+    std::array<float,3> pointOnTriangle{0.0f};
+    std::array<float,3> normal{0.0f};
     float dsq{std::numeric_limits<float>::max()};
 };
 

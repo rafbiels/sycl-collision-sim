@@ -404,7 +404,8 @@ public:
             const unsigned int vertexOffsetOtherActor = m_verticesOffset[iOtherActor];
             const unsigned int numVerticesOtherActor = m_numVertices[iOtherActor];
 
-            TVMatch result{};
+            sycl::float3 bestPointOnTriangle{0.0f};
+            float bestDsq{std::numeric_limits<float>::max()};
             unsigned int bestVertexIndex{std::numeric_limits<unsigned int>::max()};
 
             for (unsigned int iVertex{0}; iVertex<numVerticesOtherActor; ++iVertex) {
@@ -414,27 +415,31 @@ public:
 
                 const auto [closestPoint, distanceSquared] = Util::closestPointOnTriangle(transformed[0], P);
 
-                if (distanceSquared < result.dsq) {
-                    result.dsq = distanceSquared;
-                    result.pointOnTriangle = closestPoint;
+                if (distanceSquared < bestDsq) {
+                    bestDsq = distanceSquared;
+                    bestPointOnTriangle = closestPoint;
                     bestVertexIndex = iVertex;
                 }
             }
-            result.pointOnTriangle = Util::mvmul(negRot, result.pointOnTriangle) + triangle[0];
-            result.normal = sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0]);
-            float normalisation{sycl::length(result.normal)};
+            bestPointOnTriangle = Util::mvmul(negRot, bestPointOnTriangle) + triangle[0];
+            sycl::float3 normal{sycl::cross(triangle[1]-triangle[0], triangle[2]-triangle[0])};
+            float normalisation{sycl::length(normal)};
             if (normalisation==0) {
                 // Degenerate triangle - make sure it doesn't make it down the computation
                 // It is not skipped earlier to avoid thread divergence
-                result.dsq = std::numeric_limits<float>::max();
+                bestDsq = std::numeric_limits<float>::max();
             } else {
-                result.normal /= normalisation;
+                normal /= normalisation;
             }
-            sycl::float3 radius{result.pointOnTriangle - m_translation[iActor]};
-            float direction = (sycl::dot(result.normal, radius) < 0) ? -1.0f : 1.0f;
-            result.normal *= direction;
+            sycl::float3 radius{bestPointOnTriangle - m_translation[iActor]};
+            float direction = (sycl::dot(normal, radius) < 0) ? -1.0f : 1.0f;
+            normal *= direction;
 
-            m_triangleVertexMatch[result_index] = result;
+            m_triangleVertexMatch[result_index] = {
+                Util::toArray(bestPointOnTriangle),
+                Util::toArray(normal),
+                bestDsq
+            };
         }
     }
 };
@@ -511,8 +516,8 @@ public:
         const TVMatch& tvA = m_triangleBestMatch[id];
         const TVMatch& tvB = m_triangleBestMatch[idB];
         if (tvA.dsq < Constants::NarrowPhaseCollisionThreshold && tvA.dsq < tvB.dsq) {
-            const sycl::float3& point{tvA.pointOnTriangle};
-            const sycl::float3& normal{tvA.normal};
+            const sycl::float3& point{Util::toSycl(tvA.pointOnTriangle)};
+            const sycl::float3& normal{Util::toSycl(tvA.normal)};
             sycl::float3 ra = point - m_translation[iActorA];
             sycl::float3 rb = point - m_translation[iActorB];
             sycl::float3 vpa = m_linearVelocity[iActorA] + sycl::cross(m_angularVelocity[iActorA], ra);
@@ -649,12 +654,7 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
             sycl::event copyOverlappingActorsEvent = npState.overlappingActors.copyToDevice();
 
             // Reset the triangle-vertex match data on the device
-            sycl::event resetTriangleVertexMatchEvent = queue.submit([&npState](sycl::handler& cgh){
-                TVMatch* dptrTriangleVertexMatch = npState.triangleVertexMatch.devicePointer;
-                cgh.parallel_for<class TVResetKernel>(npState.triangleVertexMatch.size(), [dptrTriangleVertexMatch](sycl::id<1> id){
-                    dptrTriangleVertexMatch[id] = TVMatch{};
-                });
-            });
+            sycl::event resetTriangleVertexMatchEvent = queue.fill(npState.triangleVertexMatch.devicePointer, TVMatch{}, npState.triangleVertexMatch.size());
 
             // Submit the triangle-vertex matching kernel
             const sycl::nd_range<1> narrowPhaseRange{Util::ndRangeAllCU(npState.numTrianglesToCheck,queue)};
