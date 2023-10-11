@@ -160,8 +160,8 @@ std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl
 
     // Rotate the problem around x-axis such that B lies in the xz plane
     const float denomRotX = sycl::sqrt(B[1]*B[1]+B[2]*B[2]);
-    const float sinRotX = denomRotX==0 ? 0.0f : std::copysign(B[1] / denomRotX, B[2]);
-    const float cosRotX = denomRotX==0 ? 1.0f : std::copysign(B[2] / denomRotX, B[1]);
+    const float sinRotX = denomRotX==0 ? 0.0f : sycl::copysign(B[1] / denomRotX, B[2]);
+    const float cosRotX = denomRotX==0 ? 1.0f : sycl::copysign(B[2] / denomRotX, B[1]);
     const float3x3 rotX = {
         sycl::float3{1.0f, 0.0f, 0.0f},
         sycl::float3{0.0f, cosRotX, sinRotX},
@@ -172,8 +172,8 @@ std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl
 
     // Rotate the problem around y-axis such that B lies on the z-axis
     const float denomRotY = sycl::sqrt(B[0]*B[0]+B[2]*B[2]);
-    const float sinRotY = denomRotY==0 ? 0.0f : std::copysign(B[0] / denomRotY, B[2]);
-    const float cosRotY = denomRotY==0 ? 1.0f : std::copysign(B[2] / denomRotY, -B[0]);
+    const float sinRotY = denomRotY==0 ? 0.0f : sycl::copysign(B[0] / denomRotY, B[2]);
+    const float cosRotY = denomRotY==0 ? 1.0f : sycl::copysign(B[2] / denomRotY, -B[0]);
     const float3x3 rotY = {
         sycl::float3{cosRotY, 0.0f, -sinRotY},
         sycl::float3{0.0f, 1.0f, 0.0f},
@@ -184,8 +184,8 @@ std::array<std::array<sycl::float3,3>,3> triangleTransform(const std::array<sycl
 
     // Rotate the problem around z-axis such that C lies in the yz plane
     const float denomRotZ = sycl::sqrt(C[0]*C[0]+C[1]*C[1]);
-    const float sinRotZ = denomRotZ==0 ? 0.0f : std::copysign(C[0] / denomRotZ, C[0]);
-    const float cosRotZ = denomRotZ==0 ? 1.0f : std::copysign(C[1] / denomRotZ, -C[1]);
+    const float sinRotZ = denomRotZ==0 ? 0.0f : sycl::copysign(C[0] / denomRotZ, C[0]);
+    const float cosRotZ = denomRotZ==0 ? 1.0f : sycl::copysign(C[1] / denomRotZ, -C[1]);
     const float3x3 rotZ = {
         sycl::float3{cosRotZ, -sinRotZ, 0.0f},
         sycl::float3{sinRotZ, cosRotZ, 0.0f},
