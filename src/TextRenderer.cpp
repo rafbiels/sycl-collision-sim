@@ -51,11 +51,12 @@ bool CollisionSim::TextRenderer::newText(std::string_view key,
 void CollisionSim::TextRenderer::draw() {
     using namespace Magnum::Math::Literals;
     for (auto& [key, text] : m_texts) {
-        m_shader.bindVectorTexture(m_glyphCache->texture());
         m_shader.setTransformationProjectionMatrix(text.transform())
                 .setColor(0xffffff_rgbf)
+                .setOutlineColor(0xffffff_rgbf)
                 .setOutlineRange(0.5f, 1.0f)
-                .setSmoothness(0.075f)
+                .setSmoothness(0.2f)
+                .bindVectorTexture(m_glyphCache->texture())
                 .draw(text.renderer().mesh());
     }
 }
