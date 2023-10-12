@@ -25,6 +25,7 @@
 
 #include <vector>
 #include <mutex>
+#include <string>
 
 namespace CollisionSim {
 
@@ -80,6 +81,7 @@ class Application final : public Magnum::Platform::Application
         std::optional<sycl::queue> m_syclQueue;
 
         bool m_cpuOnly{false};
+        std::string m_deviceName;
 };
 } // namespace CollisionSim
 

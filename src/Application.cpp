@@ -62,11 +62,13 @@ m_computeTask{[this]{compute();}}
 
     if (m_cpuOnly) {
         m_sequentialState.emplace(m_world.boundaries());
+        m_deviceName = "Sequential code on CPU";
     } else {
         try {
             m_syclQueue = sycl::queue{};
             m_parallelState.emplace(m_world.boundaries(), m_actors, m_numAllVertices, m_numAllTriangles, m_syclQueue.value());
-            Corrade::Utility::Debug{} << "Running SYCL code on " << m_syclQueue->get_device().get_info<sycl::info::device::name>().c_str();
+            m_deviceName = m_syclQueue->get_device().get_info<sycl::info::device::name>();
+            Corrade::Utility::Debug{} << "Running SYCL code on " << m_deviceName.c_str();
             // Copy initial data to the device
             m_parallelState->copyAllToDeviceAsync();
             m_syclQueue->wait_and_throw();
@@ -88,7 +90,10 @@ m_computeTask{[this]{compute();}}
     m_textRenderer.newText("clock",
         Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
         Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{1.0f,0.7f}));
-
+    m_textRenderer.newText("dev",
+        Magnum::Matrix3::projection(Magnum::Vector2{windowSize()})*
+        Magnum::Matrix3::translation(Magnum::Vector2{windowSize()}*0.5f*Magnum::Vector2{-1.0f,1.0f}),
+        20.0f, Magnum::Text::Alignment::TopLeft);
     m_renderFrameTimer.reset();
     m_computeFrameTimer.reset();
     m_textUpdateTimer.reset();
@@ -129,6 +134,7 @@ void CollisionSim::Application::tickEvent() {
         m_textRenderer.get("rfps").renderer().render(Corrade::Utility::formatString("Render FPS: {:.1f}", 1.0/m_renderFrameTimeSec.value()));
         m_textRenderer.get("opf").renderer().render(Corrade::Utility::formatString("Overlaps/frame: {:.1f}", avgNumOverlaps));
         m_textRenderer.get("clock").renderer().render(Corrade::Utility::formatString("Sim time: {:.1f}s", wallTimeSec));
+        m_textRenderer.get("dev").renderer().render(m_deviceName);
         m_renderFrameTimeSec.reset();
     }
 }
