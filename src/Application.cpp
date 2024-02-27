@@ -34,12 +34,12 @@ Magnum::Platform::Application{
 #endif
 m_phongShader{Magnum::Shaders::PhongGL::Configuration{}.setLightCount(2)},
 m_world{Magnum::Vector2{windowSize()}.aspectRatio(), Util::toMagnum(Constants::DefaultWorldDimensions)},
+m_computeTask{[this]{compute();}},
 m_renderFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFrameTimeSec{Constants::FrameTimeCounterWindow},
 m_computeFPSLongAvgSec{65536},
 m_avgNumOverlaps{Constants::FrameTimeCounterWindow},
-m_avgNumOverlapsLong{65536},
-m_computeTask{[this]{compute();}}
+m_avgNumOverlapsLong{65536}
 {
     #if !HEADLESS
     Magnum::GL::Renderer::enable(Magnum::GL::Renderer::Feature::DepthTest);

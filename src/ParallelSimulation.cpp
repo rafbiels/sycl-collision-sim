@@ -193,7 +193,6 @@ class AABBKernel {
 private:
     uint16_t* m_numVertices{nullptr};
     uint32_t* m_verticesOffset{nullptr};
-    sycl::float3* m_bodyVertices{nullptr};
     sycl::float3* m_worldVertices{nullptr};
     std::array<sycl::float2*,3> m_aabb{nullptr};
     std::array<sycl::local_accessor<float,1>,3> m_localVertices{};
@@ -204,7 +203,6 @@ public:
     explicit AABBKernel(sycl::handler& cgh, const ParallelState& state) noexcept
     : m_numVertices{state.numVertices.devicePointer},
       m_verticesOffset{state.verticesOffset.devicePointer},
-      m_bodyVertices{state.bodyVertices.devicePointer},
       m_worldVertices{state.worldVertices.devicePointer},
       m_aabb{state.aabb[0].devicePointer, state.aabb[1].devicePointer, state.aabb[2].devicePointer},
       m_localVertices{sycl::local_accessor<float,1>{sycl::range<1>{state.maxNumVerticesPerActor},cgh},
@@ -406,7 +404,6 @@ public:
 
             sycl::float3 bestPointOnTriangle{0.0f};
             float bestDsq{std::numeric_limits<float>::max()};
-            unsigned int bestVertexIndex{std::numeric_limits<unsigned int>::max()};
 
             for (unsigned int iVertex{0}; iVertex<numVerticesOtherActor; ++iVertex) {
                 sycl::float3 P{m_worldVertices[vertexOffsetOtherActor+iVertex]};
@@ -418,7 +415,6 @@ public:
                 if (distanceSquared < bestDsq) {
                     bestDsq = distanceSquared;
                     bestPointOnTriangle = closestPoint;
-                    bestVertexIndex = iVertex;
                 }
             }
             bestPointOnTriangle = Util::mvmul(negRot, bestPointOnTriangle) + triangle[0];
@@ -468,7 +464,6 @@ public:
 
     void operator()(sycl::nd_item<1> item) const {
         const auto groupId{item.get_group_linear_id()};
-        const auto localId{item.get_local_linear_id()};
         TVMatch* start = m_triangleVertexMatch + groupId*Constants::MaxNumTriangles;
         TVMatch* end = start + Constants::MaxNumTriangles;
         sycl::ext::oneapi::experimental::group_with_scratchpad handle{
@@ -510,7 +505,7 @@ public:
         uint16_t iActorA = m_overlappingActors[id];
         uint16_t iActorB = m_pairedActorIndices[iActorA];
         unsigned int idB{std::numeric_limits<unsigned int>::max()};
-        for (auto i{0}; i<m_numActorsToCheck; ++i) {
+        for (unsigned int i{0}; i<static_cast<unsigned int>(m_numActorsToCheck); ++i) {
             if (m_overlappingActors[i]==iActorB) {idB = i;}
         }
         const TVMatch& tvA = m_triangleBestMatch[id];
@@ -633,16 +628,14 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
         state.pairedActorIndices.copyToHost(aabbOverlapKernelEvent).wait_and_throw();
         std::unordered_set<uint16_t> overlappingActors;
         size_t numTrianglesToCheck{0};
-        size_t numActorsToCheck{0};
         for (size_t iPair{0}; iPair<Constants::NumActorPairs; ++iPair) {
-            const std::pair<size_t,size_t>& pair{Constants::ActorPairs[iPair]};
+            const std::pair<int,int>& pair{Constants::ActorPairs[iPair]};
             if (state.pairedActorIndices.hostContainer[pair.first]==pair.second ||
                 state.pairedActorIndices.hostContainer[pair.second]==pair.first) {
                 ++state.aabbOverlapsLastFrame;
-                for (size_t iActor : {pair.first, pair.second}) {
+                for (int iActor : {pair.first, pair.second}) {
                     if (overlappingActors.insert(iActor).second) {
                         numTrianglesToCheck += state.numTriangles.hostContainer[iActor];
-                        ++numActorsToCheck;
                     };
                 }
             }
@@ -662,8 +655,6 @@ void simulateParallel(float dtime, std::vector<Actor>& actors, ParallelState& st
                 cgh.depends_on({copyOverlappingActorsEvent,resetTriangleVertexMatchEvent});
                 cgh.parallel_for(narrowPhaseRange, NarrowPhaseKernel{npState, state});
             });
-
-            TVMatch* dptrTriangleBestMatch = npState.triangleBestMatch.devicePointer;
 
             // For each actor out of numActorsToCheck, reduce all triangle-vertex pairs to the one with the smallest distance
             sycl::event triangleVertexReduceKernelEvent = queue.submit([&narrowPhaseKernelEvent, &npState](sycl::handler& cgh){
